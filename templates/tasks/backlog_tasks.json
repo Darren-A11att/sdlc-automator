@@ -1,0 +1,164 @@
+{
+  "schema": {
+    "status_values": [
+      "Todo",
+      "In-Progress",
+      "Review",
+      "Testing",
+      "Done",
+      "Blocked"
+    ],
+    "met_values": [
+      true,
+      false
+    ],
+    "_writing_guide": {
+      "description_rules": [
+        "Provide context: what this is, why it exists, how it fits with other components",
+        "Include enough detail for an agent to implement without guessing",
+        "Do NOT put verifiable outcomes here — those belong in acceptance_criteria"
+      ],
+      "acceptance_criteria_rules": [
+        "Each criterion must be something you can verify by looking at a screen, inspecting a database, or performing an action",
+        "Never restate the task name as a criterion",
+        "Be specific: name columns, endpoints, error messages, status codes, UI elements",
+        "Minimum 2 criteria per task, maximum 8",
+        "One-sentence test: if you can answer 'did this happen? yes/no' it is a good criterion"
+      ],
+      "anti_patterns": [
+        "BAD: 'Create the payments table' → GOOD: 'payments table exists with columns: id, amount, currency, status, created_at'",
+        "BAD: 'Handle errors gracefully' → GOOD: 'Invalid email returns 400 with message: Invalid email format'",
+        "BAD: 'Set up authentication' → GOOD: 'POST /api/auth/login with valid credentials returns 200 and a JWT token'",
+        "BAD: 'Implement the dashboard' → GOOD: 'Dashboard page renders a table of recent orders with columns: date, customer, total, status'"
+      ]
+    }
+  },
+  "tasks": [
+    {
+      "id": "1.1.1",
+      "name": "Create users table with auth fields (DATABASE)",
+      "status": "Done",
+      "description": "Create the users table that stores account credentials and profile data. This is the foundational table — all other entities reference it. The table must support email/password authentication and track when accounts were created and last active.",
+      "acceptance_criteria": [
+        {
+          "criterion": "users table exists with columns: id (uuid, PK), email (text, unique, not null), password_hash (text, not null), display_name (text), created_at (timestamptz), last_sign_in_at (timestamptz)",
+          "met": true
+        },
+        {
+          "criterion": "Migration file can be applied to a clean database without errors",
+          "met": true
+        },
+        {
+          "criterion": "A row with a duplicate email cannot be inserted",
+          "met": true
+        }
+      ],
+      "notes": "Completed on attempt 1",
+      "attempt_count": 1
+    },
+    {
+      "id": "1.2.1",
+      "name": "Configure ESLint and Prettier for the project (INFRASTRUCTURE)",
+      "status": "Todo",
+      "description": "Set up code quality tooling so that all developers and agents produce consistent code. ESLint enforces code correctness rules. Prettier enforces formatting. Both must work with the project's TypeScript and React configuration.",
+      "acceptance_criteria": [
+        {
+          "criterion": ".eslintrc config file exists at project root with TypeScript and React plugins enabled",
+          "met": false
+        },
+        {
+          "criterion": ".prettierrc config file exists at project root with singleQuote: true and trailingComma: all",
+          "met": false
+        },
+        {
+          "criterion": "Running the lint command exits with code 0 on all existing source files",
+          "met": false
+        },
+        {
+          "criterion": "Running the format command exits with code 0 on all existing source files",
+          "met": false
+        }
+      ],
+      "notes": "",
+      "attempt_count": 0
+    },
+    {
+      "id": "2.1.1",
+      "name": "Implement user login page with email and password (FEATURE)",
+      "status": "In-Progress",
+      "description": "Create the login page that allows existing users to authenticate. The page should have a form with email and password fields, submit to the auth API, and redirect to the dashboard on success. Error messages should be shown inline below the form.",
+      "acceptance_criteria": [
+        {
+          "criterion": "Login page renders at /login with email input, password input, and a Submit button",
+          "met": false
+        },
+        {
+          "criterion": "Submitting valid credentials redirects to /dashboard",
+          "met": false
+        },
+        {
+          "criterion": "Submitting invalid credentials shows the message 'Invalid email or password' below the form without a page reload",
+          "met": false
+        },
+        {
+          "criterion": "Submitting with an empty email or password field shows 'This field is required' below the empty field",
+          "met": false
+        },
+        {
+          "criterion": "The Submit button is disabled and shows a spinner while the auth request is in flight",
+          "met": false
+        }
+      ],
+      "notes": "",
+      "attempt_count": 1
+    },
+    {
+      "id": "3.1.1",
+      "name": "Fix navigation crash on mobile viewports (BUG)",
+      "status": "Todo",
+      "description": "The navigation component throws a React hydration error when the browser viewport is below 768px. This happens because the server renders the desktop layout but the client renders the mobile layout, causing a mismatch. The fix should ensure both server and client render the same initial markup.",
+      "acceptance_criteria": [
+        {
+          "criterion": "Navigation component renders without console errors at viewport widths 320px, 768px, and 1024px",
+          "met": false
+        },
+        {
+          "criterion": "No 'Text content did not match' or 'Hydration failed' warnings appear in the browser console at any viewport size",
+          "met": false
+        },
+        {
+          "criterion": "Mobile menu toggle button is visible and functional at viewports below 768px",
+          "met": false
+        }
+      ],
+      "notes": "",
+      "attempt_count": 0
+    },
+    {
+      "id": "4.1.1",
+      "name": "Create organisation settings page (FEATURE)",
+      "status": "Blocked",
+      "description": "Build the settings page where organisation admins can update their organisation's name, description, and contact email. The page reads from and writes to the organisations table. Changes are saved via a PATCH endpoint.",
+      "acceptance_criteria": [
+        {
+          "criterion": "Settings page renders at /org/[orgId]/settings with pre-filled form fields for name, description, and contact_email",
+          "met": false
+        },
+        {
+          "criterion": "Clicking Save sends a PATCH request to /api/orgs/[orgId] with the updated fields",
+          "met": false
+        },
+        {
+          "criterion": "A success toast appears after a successful save",
+          "met": false
+        },
+        {
+          "criterion": "If the PATCH returns a 4xx or 5xx error, an error toast appears with the server's error message",
+          "met": false
+        }
+      ],
+      "notes": "Blocked: depends on organisations table (task 2.2.1) and PATCH /api/orgs endpoint (task 2.2.2)",
+      "attempt_count": 0
+    }
+  ]
+}

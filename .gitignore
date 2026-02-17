@@ -1,0 +1,27 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs (keep directory, ignore contents)
+logs/*
+!logs/.gitkeep
+
+# Reports (keep directory, ignore contents)
+reports/*
+!reports/.gitkeep
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Claude Code
+.claude/
+
+# Scan artifacts
+.scan-pipeline.log
+
+# Temp files from atomic JSON writes
+tasks/*.tmp.*

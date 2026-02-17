@@ -1,0 +1,24 @@
+{
+  "project": {
+    "name": "REQUIRED: Your project name as it should appear in agent prompts",
+    "description": "REQUIRED: One sentence describing what the project does and who it is for"
+  },
+  "techStack": "REQUIRED: List your full stack, e.g. 'Next.js 14+ (App Router), TypeScript, Tailwind CSS, Supabase, Stripe'",
+  "conventions": [
+    "REQUIRED: List 3-7 coding conventions agents must follow",
+    "e.g. '2-space indentation'",
+    "e.g. 'camelCase for variables/functions, PascalCase for components/classes'",
+    "e.g. 'TypeScript strict mode'",
+    "e.g. 'Server Components by default, use client only when needed'"
+  ],
+  "docs": {
+    "solutionDesign": "docs/solution-design.md",
+    "prd": "docs/prd.md",
+    "businessFlows": "docs/business-flows.md",
+    "systemDiagram": "docs/system-diagram.md"
+  },
+  "build": {
+    "buildCommand": "The command agents run to verify builds, e.g. 'npm run build'",
+    "lintCommand": "The command agents run to check code quality, e.g. 'npm run lint'"
+  }
+}

@@ -1,0 +1,12 @@
+{
+    "active": false,
+    "agent": "",
+    "taskId": "",
+    "taskFile": "",
+    "iteration": 0,
+    "maxIterations": 3,
+    "escalationCycle": 0,
+    "maxEscalations": 3,
+    "isDebugMode": false,
+    "stuckCount": 0
+  }
