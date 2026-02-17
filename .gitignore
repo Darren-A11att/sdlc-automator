@@ -23,5 +23,9 @@ reports/*
 # Scan artifacts
 .scan-pipeline.log
 
+# Node.js
+node_modules/
+dist/
+
 # Temp files from atomic JSON writes
 tasks/*.tmp.*
