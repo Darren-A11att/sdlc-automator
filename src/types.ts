@@ -7,6 +7,15 @@ export type TaskStatus =
   | "In-Progress"
   | "Review"
   | "Testing"
+  | `Testing:${string}`
+  | "Done"
+  | "Blocked";
+
+export type StoryStatus =
+  | "Todo"
+  | "In-Progress"
+  | "Testing"
+  | `Testing:${string}`
   | "Done"
   | "Blocked";
 
@@ -17,10 +26,22 @@ export interface AcceptanceCriterion {
 
 export interface Task {
   id: string;
+  story_id?: string;
   name: string;
   status: TaskStatus;
   description: string;
   acceptance_criteria: AcceptanceCriterion[];
+  notes: string;
+  attempt_count: number;
+}
+
+export interface Story {
+  id: string;
+  name: string;
+  status: StoryStatus;
+  description: string;
+  acceptance_criteria: AcceptanceCriterion[];
+  task_ids: string[];
   notes: string;
   attempt_count: number;
 }
@@ -31,6 +52,7 @@ export interface BacklogFile {
     met_values: boolean[];
     _writing_guide?: unknown;
   };
+  stories?: Story[];
   tasks: Task[];
 }
 
@@ -48,6 +70,40 @@ export type Verdict = "PASS" | "FAIL" | "UNKNOWN";
 
 export type BlockerVerdict = "CLEAR" | "BLOCKED";
 
+export type TestTypeName =
+  | "Unit"
+  | "Integration"
+  | "Contract"
+  | "Regression"
+  | "Smoke"
+  | "Security"
+  | "Performance"
+  | "Accessibility"
+  | "Exploratory"
+  | "UAT";
+
+export type TestTier = "task" | "story";
+
+export interface TestTypeResult {
+  testType: TestTypeName;
+  verdict: Verdict;
+  notes: string;
+  skipped: boolean;
+  skipReason?: string;
+  durationMs: number;
+  costUsd: number;
+}
+
+export interface TestOrchestrationResult {
+  overallVerdict: Verdict;
+  results: TestTypeResult[];
+  haltedAt?: TestTypeName;
+  fixAttempted: boolean;
+  totalDurationMs: number;
+  totalCostUsd: number;
+  reportPath?: string;
+}
+
 export interface ProjectConfig {
   projectName: string;
   techStack: string;
@@ -58,6 +114,7 @@ export interface ProjectConfig {
   docPrd: string;
   docBusinessFlows: string;
   projectDir: string;
+  applicationUrl?: string;
 }
 
 export interface AgentResult {

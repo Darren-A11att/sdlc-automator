@@ -21,6 +21,7 @@ export function loadProjectConfig(projectDir: string): ProjectConfig {
     process.exit(1);
   }
   const conventions = (raw.conventions || []).map((c: string) => `- ${c}`).join("\n");
+  const applicationUrl: string | undefined = raw.testing?.applicationUrl || undefined;
   return {
     projectName,
     techStack: raw.techStack || "",
@@ -31,6 +32,7 @@ export function loadProjectConfig(projectDir: string): ProjectConfig {
     docPrd: path.join(projectDir, raw.docs?.prd || "docs/prd.md"),
     docBusinessFlows: path.join(projectDir, raw.docs?.businessFlows || "docs/business-flows.md"),
     projectDir,
+    applicationUrl,
   };
 }
 
@@ -44,5 +46,5 @@ Business Flows: ${config.docBusinessFlows}
 Backlog: ${backlogFile}
 
 Conventions:
-${config.conventions}`;
+${config.conventions}${config.applicationUrl ? `\nApplication URL: ${config.applicationUrl}` : ""}`;
 }

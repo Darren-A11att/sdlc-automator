@@ -1,28 +1,26 @@
 // =============================================================================
-// agents/kimi.ts - Kimi Agent SDK wrapper (placeholder)
+// agents/kimi.ts - Kimi Agent SDK wrapper
 //
 // Replaces: invoke_kimi() from cli-wrapper.sh
-//
-// NOTE: The Kimi Agent SDK (@moonshot-ai/kimi-agent-sdk) is referenced in the
-// plan but may not yet be published. This module provides a compatible wrapper
-// that falls back to the kimi CLI if the SDK is not available.
+// Uses: createSession() from @moonshot-ai/kimi-agent-sdk
 // =============================================================================
 
 import fs from "node:fs";
 import path from "node:path";
-import { execSync } from "node:child_process";
-import { formatKimiEvent } from "../stream/formatter.js";
+import { createSession, collectText } from "@moonshot-ai/kimi-agent-sdk";
+import type { StreamEvent } from "@moonshot-ai/kimi-agent-sdk";
+import { formatKimiSdkEvent } from "../stream/formatter.js";
 import type { AgentResult } from "../types.js";
 import type { AgentOptions } from "./types.js";
 
 /**
- * Invoke Kimi CLI to run an agent with the given options.
+ * Invoke Kimi Agent SDK to run an agent with the given options.
  *
- * Replaces the bash `invoke_kimi` function. Uses the kimi CLI directly
- * since the Kimi Agent SDK may not be available as an npm package.
+ * Replaces the bash `invoke_kimi` function which called `kimi --print -p`.
+ * Uses the Kimi Agent SDK's createSession() + session.prompt() API.
  *
- * System and user prompts are combined with delimiters since kimi has
- * no --append-system-prompt support.
+ * System and user prompts are combined with delimiters since the Kimi SDK
+ * has no separate system prompt support.
  */
 export async function invokeKimiAgent(options: AgentOptions): Promise<AgentResult> {
   const {
@@ -37,59 +35,52 @@ export async function invokeKimiAgent(options: AgentOptions): Promise<AgentResul
   const logDir = path.dirname(logFile);
   fs.mkdirSync(logDir, { recursive: true });
 
-  // Combine system prompt + user prompt (kimi has no --append-system-prompt)
+  // Combine system prompt + user prompt (Kimi SDK has no separate system prompt)
   const combinedPrompt = `=== SYSTEM INSTRUCTIONS ===\n\n${systemPrompt}\n\n=== TASK ===\n\n${userPrompt}`;
 
+  const rawLogLines: string[] = [];
+  const allEvents: StreamEvent[] = [];
+  let resultText = "";
+
+  const session = createSession({
+    workDir: cwd,
+    thinking: true,
+    yoloMode: true,
+  });
+
   try {
-    let output: string;
+    const turn = session.prompt(combinedPrompt);
 
-    if (verbose) {
-      // Verbose mode: stream-json, no --final-message-only
-      output = execSync(
-        `kimi --print -p ${escapeShellArg(combinedPrompt)} --output-format=stream-json`,
-        { cwd, encoding: "utf-8", maxBuffer: 50 * 1024 * 1024 },
-      );
+    for await (const event of turn) {
+      rawLogLines.push(JSON.stringify(event));
+      allEvents.push(event);
 
-      // Parse and format each JSONL line for display
-      for (const line of output.split("\n")) {
-        if (!line.trim()) continue;
-        try {
-          const event = JSON.parse(line);
-          formatKimiEvent(event);
-        } catch {
-          // Skip non-JSON lines
-        }
+      if (verbose) {
+        formatKimiSdkEvent(event);
       }
-    } else {
-      // Normal mode: final message only
-      output = execSync(
-        `kimi --print -p ${escapeShellArg(combinedPrompt)} --output-format=stream-json --final-message-only`,
-        { cwd, encoding: "utf-8", maxBuffer: 50 * 1024 * 1024 },
-      );
-    }
 
-    // Write raw output to log
-    fs.writeFileSync(logFile, output, "utf-8");
-
-    // Parse JSONL - extract content from last assistant message
-    let resultText = "";
-    for (const line of output.split("\n")) {
-      if (!line.trim()) continue;
-      try {
-        const parsed = JSON.parse(line);
-        if (parsed.role === "assistant" && parsed.content) {
-          resultText = typeof parsed.content === "string"
-            ? parsed.content
-            : JSON.stringify(parsed.content);
+      // Accumulate text from ContentPart events
+      if ("payload" in event && event.type === "ContentPart") {
+        const payload = event.payload as { type: string; text?: string; think?: string };
+        if (payload.type === "text" && payload.text) {
+          resultText += payload.text;
         }
-      } catch {
-        // Skip non-JSON lines
       }
     }
 
-    // Fallback: use raw output if no assistant message found
+    // If no text was accumulated from ContentPart events, use collectText helper
     if (!resultText) {
-      resultText = output;
+      resultText = collectText(allEvents);
+    }
+
+    // Write raw log
+    fs.writeFileSync(logFile, rawLogLines.join("\n"), "utf-8");
+
+    if (!resultText) {
+      return {
+        success: false,
+        output: "",
+      };
     }
 
     return {
@@ -97,17 +88,15 @@ export async function invokeKimiAgent(options: AgentOptions): Promise<AgentResul
       output: resultText,
     };
   } catch (err) {
-    const errorMsg = err instanceof Error ? err.message : String(err);
-    fs.writeFileSync(logFile, errorMsg, "utf-8");
+    // Write whatever we have to the log
+    fs.writeFileSync(logFile, rawLogLines.join("\n"), "utf-8");
 
+    const errorMsg = err instanceof Error ? err.message : String(err);
     return {
       success: false,
       output: errorMsg,
     };
+  } finally {
+    await session.close();
   }
-}
-
-/** Escape a string for safe shell argument usage */
-function escapeShellArg(arg: string): string {
-  return `'${arg.replace(/'/g, "'\\''")}'`;
 }

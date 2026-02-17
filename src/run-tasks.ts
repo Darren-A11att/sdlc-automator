@@ -12,6 +12,7 @@ import Backlog from "./backlog/backlog.js";
 import { MAX_CONSECUTIVE_BLOCKS } from "./config.js";
 import Logger from "./logging/logger.js";
 import { processTask } from "./pipeline/process-task.js";
+import { processStory } from "./pipeline/process-story.js";
 import { loadProjectConfig } from "./prompts/common.js";
 import { runBlockerAnalysis } from "./runners/blocker-analysis.js";
 import { runBlockReporter } from "./runners/block-reporter.js";
@@ -141,7 +142,7 @@ async function main(): Promise<void> {
     backlog.resetTaskToTodo(args.retryTaskId);
     logger.log("INFO", `Task ${args.retryTaskId} reset to Todo`);
 
-    await processTask(args.retryTaskId, backlog, config, BACKLOG_FILE, logger, args.cliProvider, args.verbose);
+    await processTask(args.retryTaskId, backlog, config, BACKLOG_FILE, logger, args.cliProvider, args.verbose, REPORTS_DIR);
     logger.printSummary();
     logger.log("INFO", `Session ended. Log: ${logger.sessionLogFile}`);
     return;
@@ -239,11 +240,19 @@ async function main(): Promise<void> {
     // Process the task — retry until it reaches a terminal state
     while (true) {
       const success = await processTask(
-        taskId, backlog, config, BACKLOG_FILE, logger, args.cliProvider, args.verbose,
+        taskId, backlog, config, BACKLOG_FILE, logger, args.cliProvider, args.verbose, REPORTS_DIR,
       );
 
       if (success) {
         logger.log("INFO", `[${taskId}] Task completed successfully`);
+
+        // After task Done, check if parent story is ready for testing
+        const story = backlog.getStoryByTaskId(taskId);
+        if (story && backlog.areAllStoryTasksDone(story.id) && story.status !== "Done") {
+          logger.log("INFO", `[${story.id}] All tasks Done. Starting story-level testing...`);
+          await processStory(story.id, backlog, config, BACKLOG_FILE, logger, args.verbose, REPORTS_DIR);
+        }
+
         break;
       }
 

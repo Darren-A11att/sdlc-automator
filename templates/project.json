@@ -20,5 +20,8 @@
   "build": {
     "buildCommand": "The command agents run to verify builds, e.g. 'npm run build'",
     "lintCommand": "The command agents run to check code quality, e.g. 'npm run lint'"
+  },
+  "testing": {
+    "applicationUrl": "OPTIONAL: URL where the deployed app is accessible for browser-based tests (UAT, Smoke, etc.), e.g. 'http://localhost:3000'"
   }
 }

@@ -1,4 +1,33 @@
-import type { AgentResult } from "../types.js";
+import type { StreamEvent } from "@moonshot-ai/kimi-agent-sdk";
+
+// Local type aliases for Kimi SDK event payloads.
+// The SDK's Zod-inferred types don't resolve cleanly under zod 4.x,
+// so we define the shapes we need directly.
+interface KimiContentPart {
+  type: string;
+  text?: string;
+  think?: string;
+}
+
+interface KimiToolCallPayload {
+  type: "function";
+  id: string;
+  function: { name: string; arguments?: string | null };
+}
+
+interface KimiToolResultPayload {
+  tool_call_id: string;
+  return_value: {
+    is_error: boolean;
+    output: string | KimiContentPart[];
+    message: string;
+  };
+}
+
+interface KimiApprovalPayload {
+  id: string;
+  description: string;
+}
 
 // Color support
 const isTTY = process.stderr.isTTY ?? false;
@@ -121,89 +150,120 @@ export function formatAgentEvent(message: any): void {
   }
 }
 
+/** Kimi tool name → display name mapping */
+const KIMI_TOOL_DISPLAY_NAMES: Record<string, string> = {
+  ReadFile: "Read",
+  ReadFiles: "Read",
+  StrReplaceFile: "Edit",
+  WriteFile: "Write",
+  RunCommand: "Bash",
+  SearchText: "Grep",
+  GrepTool: "Grep",
+  ListDirectory: "LS",
+  SetTodoList: "Todo",
+};
+
+function formatKimiToolCall(tc: KimiToolCallPayload): void {
+  const name = tc.function?.name ?? "unknown";
+  const displayName = KIMI_TOOL_DISPLAY_NAMES[name] ?? name;
+  const argsStr = tc.function?.arguments ?? "{}";
+  let argSummary = "";
+  try {
+    const args = JSON.parse(argsStr);
+    switch (name) {
+      case "ReadFile":
+      case "ReadFiles":
+        argSummary = args.file_path ?? args.paths?.[0] ?? "";
+        break;
+      case "StrReplaceFile":
+      case "WriteFile":
+        argSummary = args.file_path ?? "";
+        break;
+      case "RunCommand":
+        argSummary = args.command ?? "";
+        break;
+      case "SetTodoList":
+        argSummary = `${args.items?.length ?? "?"} items`;
+        break;
+      case "SearchText":
+      case "GrepTool":
+        argSummary = args.pattern ?? args.query ?? "";
+        break;
+      case "ListDirectory":
+        argSummary = args.path ?? "";
+        break;
+      default:
+        argSummary = Object.keys(args)[0] ?? "";
+        break;
+    }
+  } catch {
+    // leave argSummary empty
+  }
+  process.stderr.write(`  ${yellow}[TOOL]${reset}  ${displayName} → ${truncate(argSummary, 100)}\n`);
+}
+
+function formatKimiToolResult(tr: KimiToolResultPayload): void {
+  const rv = tr.return_value;
+  const content = typeof rv.output === "string"
+    ? rv.output
+    : rv.output.filter((p) => p.type === "text").map((p) => p.text ?? "").join("");
+
+  if (rv.is_error) {
+    process.stderr.write(`  ${red}[RSLT]${reset}  ERROR ${truncate(content, 100)}\n`);
+  } else if (/exit code [1-9]|error:|fatal:/i.test(content)) {
+    process.stderr.write(`  ${red}[RSLT]${reset}  ERROR ${truncate(content, 100)}\n`);
+  } else if (content.length > 200) {
+    const lineCount = content.split("\n").length;
+    process.stderr.write(`  ${green}[RSLT]${reset}  ${lineCount} lines (ok)\n`);
+  } else {
+    process.stderr.write(`  ${green}[RSLT]${reset}  ${truncate(content, 100) || "(ok)"}\n`);
+  }
+}
+
 /**
- * Format a Kimi SDK event for terminal display.
+ * Format a Kimi Agent SDK stream event for terminal display.
  * Writes formatted output to stderr.
  *
- * Kimi events have a different shape - this handles:
- * - role: "assistant" with content array (think/text blocks) and tool_calls array
- * - role: "tool" with content string (tool results)
+ * Handles the typed StreamEvent union from @moonshot-ai/kimi-agent-sdk:
+ * - ContentPart (text/think)
+ * - ToolCall
+ * - ToolResult
+ * - ApprovalRequest (shouldn't occur with yoloMode)
+ * - TurnBegin, StepBegin, StatusUpdate, etc. (skipped)
  */
-export function formatKimiEvent(event: any): void {
-  if (event.role === "assistant") {
-    // Process content array
-    if (Array.isArray(event.content)) {
-      for (const block of event.content) {
-        if (block.type === "think") {
-          const text = truncate(block.think ?? "", 100);
-          process.stderr.write(`  ${dim}[THINK]${reset} ${text}\n`);
-        } else if (block.type === "text" || !block.type) {
-          const text = truncate(block.text ?? String(block) ?? "", 120);
-          if (text) {
-            process.stderr.write(`  ${cyan}[TEXT]${reset}  ${text}\n`);
-          }
-        }
+export function formatKimiSdkEvent(event: StreamEvent): void {
+  // ParseError events have type: "error" and no payload — skip them
+  if (!("payload" in event)) return;
+
+  // The event has a payload — cast through a helper to get typed access
+  // since StreamEvent's discriminated union doesn't narrow `payload` cleanly
+  const e = event as { type: string; payload: unknown };
+
+  switch (e.type) {
+    case "ContentPart": {
+      const payload = e.payload as KimiContentPart;
+      if (payload.type === "think" && payload.think) {
+        process.stderr.write(`  ${dim}[THINK]${reset} ${truncate(payload.think, 100)}\n`);
+      } else if (payload.type === "text" && payload.text) {
+        process.stderr.write(`  ${cyan}[TEXT]${reset}  ${truncate(payload.text, 120)}\n`);
       }
-    } else if (typeof event.content === "string" && event.content) {
-      process.stderr.write(`  ${cyan}[TEXT]${reset}  ${truncate(event.content, 120)}\n`);
+      break;
     }
 
-    // Process tool_calls
-    if (Array.isArray(event.tool_calls)) {
-      for (const tc of event.tool_calls) {
-        const name = tc.function?.name ?? "unknown";
-        const argsStr = tc.function?.arguments ?? "{}";
-        let argSummary = "";
-        try {
-          const args = JSON.parse(argsStr);
-          switch (name) {
-            case "ReadFile":
-            case "ReadFiles":
-              argSummary = args.file_path ?? args.paths?.[0] ?? "";
-              process.stderr.write(`  ${yellow}[TOOL]${reset}  Read → ${truncate(argSummary, 100)}\n`);
-              break;
-            case "StrReplaceFile":
-              argSummary = args.file_path ?? "";
-              process.stderr.write(`  ${yellow}[TOOL]${reset}  Edit → ${truncate(argSummary, 100)}\n`);
-              break;
-            case "WriteFile":
-              argSummary = args.file_path ?? "";
-              process.stderr.write(`  ${yellow}[TOOL]${reset}  Write → ${truncate(argSummary, 100)}\n`);
-              break;
-            case "RunCommand":
-              argSummary = args.command ?? "";
-              process.stderr.write(`  ${yellow}[TOOL]${reset}  Bash → ${truncate(argSummary, 100)}\n`);
-              break;
-            case "SetTodoList":
-              process.stderr.write(`  ${yellow}[TOOL]${reset}  Todo → ${args.items?.length ?? "?"} items\n`);
-              break;
-            case "SearchText":
-            case "GrepTool":
-              argSummary = args.pattern ?? args.query ?? "";
-              process.stderr.write(`  ${yellow}[TOOL]${reset}  Grep → ${truncate(argSummary, 100)}\n`);
-              break;
-            case "ListDirectory":
-              argSummary = args.path ?? "";
-              process.stderr.write(`  ${yellow}[TOOL]${reset}  LS → ${truncate(argSummary, 100)}\n`);
-              break;
-            default:
-              process.stderr.write(`  ${yellow}[TOOL]${reset}  ${name} → ${Object.keys(args)[0] ?? ""}\n`);
-              break;
-          }
-        } catch {
-          process.stderr.write(`  ${yellow}[TOOL]${reset}  ${name}\n`);
-        }
-      }
-    }
-  } else if (event.role === "tool") {
-    const content = event.content ?? "";
-    if (/error:|fatal:|exit code [1-9]/i.test(content)) {
-      process.stderr.write(`  ${red}[RSLT]${reset}  ERROR ${truncate(content, 100)}\n`);
-    } else if (content.length > 200) {
-      const lineCount = content.split("\n").length;
-      process.stderr.write(`  ${green}[RSLT]${reset}  ${lineCount} lines (ok)\n`);
-    } else {
-      process.stderr.write(`  ${green}[RSLT]${reset}  ${truncate(content, 100) || "(ok)"}\n`);
-    }
+    case "ToolCall":
+      formatKimiToolCall(e.payload as KimiToolCallPayload);
+      break;
+
+    case "ToolResult":
+      formatKimiToolResult(e.payload as KimiToolResultPayload);
+      break;
+
+    case "ApprovalRequest":
+      process.stderr.write(`  ${yellow}[APRV]${reset}  ${truncate((e.payload as KimiApprovalPayload).description, 100)}\n`);
+      break;
+
+    default:
+      // Skip lifecycle events: TurnBegin, TurnEnd, StepBegin, StatusUpdate, etc.
+      break;
   }
 }

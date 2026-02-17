@@ -13,11 +13,11 @@ export type LogLevel = "INFO" | "WARN" | "ERROR" | "DEBUG";
  * Logger class providing session-scoped file logging and utility output.
  *
  * Mirrors the behaviour of scripts/lib/logging.sh:
- *   - init_session_log()  → constructor (creates log file with header)
- *   - log()               → log()
- *   - get_task_log_dir()  → getTaskLogDir()
- *   - print_summary()     → printSummary()
- *   - print_usage()       → printUsage()
+ *   - init_session_log()  -> constructor (creates log file with header)
+ *   - log()               -> log()
+ *   - get_task_log_dir()  -> getTaskLogDir()
+ *   - print_summary()     -> printSummary()
+ *   - print_usage()       -> printUsage()
  */
 export class Logger {
   /** Absolute path to the logs root directory (e.g. `<project>/logs`) */
@@ -76,10 +76,10 @@ export class Logger {
   }
 
   /**
-   * Read the backlog JSON file, count tasks by status, and print a
+   * Read the backlog JSON file, count tasks and stories by status, and print a
    * formatted summary table to stdout.
    *
-   * Mirrors `print_summary()` in logging.sh.
+   * Testing:* substates are counted under "Testing".
    */
   printSummary(): void {
     if (!fs.existsSync(this.backlogFile)) {
@@ -90,19 +90,24 @@ export class Logger {
     const raw = fs.readFileSync(this.backlogFile, "utf8");
     const backlog: BacklogFile = JSON.parse(raw) as BacklogFile;
     const tasks = backlog.tasks ?? [];
+    const stories = backlog.stories ?? [];
 
-    const count = (status: string): number =>
-      tasks.filter((t) => t.status === status).length;
+    // Task counts - Testing:* substates count as "Testing"
+    const countTasks = (status: string): number =>
+      tasks.filter((t) =>
+        status === "Testing"
+          ? t.status === "Testing" || t.status.startsWith("Testing:")
+          : t.status === status
+      ).length;
 
-    const done = count("Done");
-    const inProgress = count("In-Progress");
-    const review = count("Review");
-    const testing = count("Testing");
-    const todo = count("Todo");
-    const blocked = count("Blocked");
+    const done = countTasks("Done");
+    const inProgress = countTasks("In-Progress");
+    const review = countTasks("Review");
+    const testing = countTasks("Testing");
+    const todo = countTasks("Todo");
+    const blocked = countTasks("Blocked");
     const total = tasks.length;
 
-    // Matches bash printf "%-15s %5s\n" layout exactly
     const row = (label: string, value: string | number): void => {
       const lPad = label.padEnd(15);
       const rPad = String(value).padStart(5);
@@ -123,6 +128,36 @@ export class Logger {
     row("---------------", "-----");
     row("Total", total);
     console.log("");
+
+    // Story summary (if stories exist)
+    if (stories.length > 0) {
+      const countStories = (status: string): number =>
+        stories.filter((s) =>
+          status === "Testing"
+            ? s.status === "Testing" || s.status.startsWith("Testing:")
+            : s.status === status
+        ).length;
+
+      const sDone = countStories("Done");
+      const sInProgress = countStories("In-Progress");
+      const sTesting = countStories("Testing");
+      const sTodo = countStories("Todo");
+      const sBlocked = countStories("Blocked");
+      const sTotal = stories.length;
+
+      console.log("=== Story Summary ===");
+      console.log("");
+      row("Status", "Count");
+      row("---------------", "-----");
+      row("Done", sDone);
+      row("In-Progress", sInProgress);
+      row("Testing", sTesting);
+      row("Todo", sTodo);
+      row("Blocked", sBlocked);
+      row("---------------", "-----");
+      row("Total", sTotal);
+      console.log("");
+    }
   }
 
   /**
@@ -164,20 +199,25 @@ Description:
   - Process tasks in order (feature -> story -> task)
   - Skip tasks that are Done or Blocked
   - Execute Todo and In-Progress tasks
+  - Run task-level tests (Unit, Integration, Contract) per task
+  - Run story-level tests (Regression through UAT) when all tasks pass
   - Log all operations to timestamped log files
-  - Provide a summary of task statuses
+  - Provide a summary of task and story statuses
 
 Task Statuses:
-  Todo        - Task is ready to be started
-  In-Progress - Task is currently being worked on
-  Review      - Task is awaiting code review
-  Testing     - Task is in QA/testing phase
-  Done        - Task is completed
-  Blocked     - Task is blocked and cannot proceed
+  Todo          - Task is ready to be started
+  In-Progress   - Task is currently being worked on
+  Review        - Task is awaiting code review
+  Testing       - Task is in QA/testing phase
+  Testing:Unit  - Running unit tests
+  Testing:*     - Running specific test type
+  Done          - Task is completed
+  Blocked       - Task is blocked and cannot proceed
 
 Logs:
   Session logs: logs/run-YYYYMMDD-HHMMSS.log
   Task logs:    logs/tasks/<task_id>/
+  Story logs:   logs/stories/<story_id>/
 
 `;
     process.stdout.write(text);

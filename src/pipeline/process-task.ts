@@ -2,11 +2,10 @@ import Backlog from "../backlog/backlog.js";
 import { MAX_ATTEMPTS } from "../config.js";
 import { parseVerdict } from "../parsers/verdict.js";
 import { parseNotes } from "../parsers/notes.js";
-import { parseCriteriaResults } from "../parsers/criteria.js";
 import { runImplementer } from "../runners/implementer.js";
 import { runReviewer } from "../runners/reviewer.js";
-import { runTester } from "../runners/tester.js";
 import { runFixer } from "../runners/fixer.js";
+import { runTaskTestOrchestrator } from "../runners/task-test-orchestrator.js";
 import { gitCommitTask, gitCommitProgress } from "./git.js";
 import type { CliProvider, ProjectConfig } from "../types.js";
 import type Logger from "../logging/logger.js";
@@ -16,8 +15,8 @@ import type Logger from "../logging/logger.js";
  *
  * Pipeline flow:
  *   Step 1 (first attempt only): Implementation
- *   Step 2 (all attempts): Review → (Fix if FAIL)
- *   Step 3 (all attempts): Test → Done | (Fix → Re-test → Done | Todo)
+ *   Step 2 (all attempts): Review -> (Fix if FAIL)
+ *   Step 3 (all attempts): Task Tests (Unit/Integration/Contract) -> Done | Todo
  *
  * Returns true if task completed successfully (Done), false otherwise.
  */
@@ -29,6 +28,7 @@ export async function processTask(
   logger: Logger,
   cliProvider: CliProvider,
   verbose: boolean,
+  reportsDir: string,
 ): Promise<boolean> {
   // Fetch fresh task data
   let task = backlog.getTaskById(taskId);
@@ -98,28 +98,15 @@ export async function processTask(
     gitCommitProgress(taskId, "after-review-fix", config.projectDir, logger);
   }
 
-  // --- Step 3: Testing ---
+  // --- Step 3: Task-Level Testing (Unit, Integration, Contract) ---
   backlog.updateTaskStatus(taskId, "Testing");
   task = backlog.getTaskById(taskId)!;
 
-  const testResult = await runTester(task, config, backlogFile, logger, verbose);
-  if (!testResult.success) {
-    backlog.appendTaskNotes(taskId, `Tester failed on attempt ${attemptCount}`);
-    backlog.updateTaskStatus(taskId, "Todo");
-    return false;
-  }
+  const taskTestResult = await runTaskTestOrchestrator(
+    task, config, backlogFile, backlog, logger, verbose, reportsDir,
+  );
 
-  const testVerdict = parseVerdict(testResult.output);
-  logger.log("INFO", `[${taskId}] Test verdict: ${testVerdict}`);
-
-  // Update criteria from test results
-  const criteriaJson = parseCriteriaResults(testResult.output);
-  if (criteriaJson) {
-    backlog.updateCriteriaMet(taskId, criteriaJson);
-  }
-
-  // If all tests pass, task is Done
-  if (testVerdict === "PASS") {
+  if (taskTestResult.overallVerdict === "PASS") {
     backlog.updateTaskStatus(taskId, "Done");
     task = backlog.getTaskById(taskId)!;
     gitCommitTask(taskId, task.name, config.projectDir, logger);
@@ -128,56 +115,9 @@ export async function processTask(
     return true;
   }
 
-  // Tests failed - try to fix
-  let testNotes = parseNotes(testResult.output);
-  if (!testNotes) {
-    testNotes = `Test verdict: FAIL. Criteria results: ${criteriaJson ? JSON.stringify(criteriaJson) : "none available"}`;
-  }
-  backlog.appendTaskNotes(taskId, `Test FAIL: ${testNotes}`);
-
-  backlog.updateTaskStatus(taskId, "In-Progress");
-  task = backlog.getTaskById(taskId)!;
-
-  const fixResult = await runFixer(task, testNotes, attemptCount, config, backlogFile, logger, verbose);
-  if (!fixResult.success) {
-    backlog.appendTaskNotes(taskId, `Fixer failed after test on attempt ${attemptCount}`);
-    backlog.updateTaskStatus(taskId, "Todo");
-    return false;
-  }
-  gitCommitProgress(taskId, "after-test-fix", config.projectDir, logger);
-
-  // Re-test after fix
-  backlog.updateTaskStatus(taskId, "Testing");
-  task = backlog.getTaskById(taskId)!;
-
-  const retestResult = await runTester(task, config, backlogFile, logger, verbose);
-  if (!retestResult.success) {
-    backlog.appendTaskNotes(taskId, `Re-tester failed on attempt ${attemptCount}`);
-    backlog.updateTaskStatus(taskId, "Todo");
-    return false;
-  }
-
-  const retestVerdict = parseVerdict(retestResult.output);
-  logger.log("INFO", `[${taskId}] Re-test verdict: ${retestVerdict}`);
-
-  // Update criteria from re-test
-  const retestCriteria = parseCriteriaResults(retestResult.output);
-  if (retestCriteria) {
-    backlog.updateCriteriaMet(taskId, retestCriteria);
-  }
-
-  if (retestVerdict === "PASS") {
-    backlog.updateTaskStatus(taskId, "Done");
-    task = backlog.getTaskById(taskId)!;
-    gitCommitTask(taskId, task.name, config.projectDir, logger);
-    backlog.appendTaskNotes(taskId, `Completed on attempt ${attemptCount} (after fix)`);
-    logger.log("INFO", `[${taskId}] DONE - Task completed after fix`);
-    return true;
-  }
-
-  // Re-test still failed
-  backlog.appendTaskNotes(taskId, `Re-test still failing on attempt ${attemptCount}`);
+  // Task tests failed - back to Todo for retry
+  backlog.appendTaskNotes(taskId, `Task tests failed on attempt ${attemptCount} (halted at: ${taskTestResult.haltedAt ?? "none"})`);
   backlog.updateTaskStatus(taskId, "Todo");
-  logger.log("WARN", `[${taskId}] Still failing after attempt ${attemptCount}. Queued for retry.`);
+  logger.log("WARN", `[${taskId}] Task tests failed on attempt ${attemptCount}. Queued for retry.`);
   return false;
 }

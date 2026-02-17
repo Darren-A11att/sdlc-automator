@@ -5,6 +5,16 @@
       "In-Progress",
       "Review",
       "Testing",
+      "Testing:Unit",
+      "Testing:Integration",
+      "Testing:Contract",
+      "Testing:Regression",
+      "Testing:Smoke",
+      "Testing:Security",
+      "Testing:Performance",
+      "Testing:Accessibility",
+      "Testing:Exploratory",
+      "Testing:UAT",
       "Done",
       "Blocked"
     ],
@@ -25,6 +35,11 @@
         "Minimum 2 criteria per task, maximum 8",
         "One-sentence test: if you can answer 'did this happen? yes/no' it is a good criterion"
       ],
+      "story_criteria_rules": [
+        "Story acceptance criteria are written as literal user actions that become the UAT script",
+        "Each criterion describes what a user does and what they see, not technical details",
+        "Example: 'I can enter my username and password and click Login to reach the dashboard'"
+      ],
       "anti_patterns": [
         "BAD: 'Create the payments table' → GOOD: 'payments table exists with columns: id, amount, currency, status, created_at'",
         "BAD: 'Handle errors gracefully' → GOOD: 'Invalid email returns 400 with message: Invalid email format'",
@@ -33,6 +48,38 @@
       ]
     }
   },
+  "stories": [
+    {
+      "id": "S-2.1",
+      "name": "User Login",
+      "status": "Todo",
+      "description": "As a user I want to log in to the platform so I can use it",
+      "acceptance_criteria": [
+        {
+          "criterion": "There is a login button on the home page that takes me to the login page",
+          "met": false
+        },
+        {
+          "criterion": "I can enter my username and password if I have an account",
+          "met": false
+        },
+        {
+          "criterion": "After entering a valid username and password I am logged in",
+          "met": false
+        },
+        {
+          "criterion": "After logging in I am taken to the main dashboard",
+          "met": false
+        }
+      ],
+      "task_ids": [
+        "2.1.1",
+        "2.1.2"
+      ],
+      "notes": "",
+      "attempt_count": 0
+    }
+  ],
   "tasks": [
     {
       "id": "1.1.1",
@@ -84,9 +131,29 @@
     },
     {
       "id": "2.1.1",
-      "name": "Implement user login page with email and password (FEATURE)",
-      "status": "In-Progress",
-      "description": "Create the login page that allows existing users to authenticate. The page should have a form with email and password fields, submit to the auth API, and redirect to the dashboard on success. Error messages should be shown inline below the form.",
+      "story_id": "S-2.1",
+      "name": "Add login button to home page navigating to login page",
+      "status": "Todo",
+      "description": "Add a login button component to the home page that navigates users to the /login route when clicked.",
+      "acceptance_criteria": [
+        {
+          "criterion": "LoginButton component rendered on HomePage",
+          "met": false
+        },
+        {
+          "criterion": "Button has text 'Log In' and links to /login",
+          "met": false
+        }
+      ],
+      "notes": "",
+      "attempt_count": 0
+    },
+    {
+      "id": "2.1.2",
+      "story_id": "S-2.1",
+      "name": "Implement login page with email/password form and auth API call",
+      "status": "Todo",
+      "description": "Create the login page at /login with email and password fields, submit to auth API, redirect to dashboard on success, show error on failure.",
       "acceptance_criteria": [
         {
           "criterion": "Login page renders at /login with email input, password input, and a Submit button",
@@ -97,20 +164,12 @@
           "met": false
         },
         {
-          "criterion": "Submitting invalid credentials shows the message 'Invalid email or password' below the form without a page reload",
-          "met": false
-        },
-        {
-          "criterion": "Submitting with an empty email or password field shows 'This field is required' below the empty field",
-          "met": false
-        },
-        {
-          "criterion": "The Submit button is disabled and shows a spinner while the auth request is in flight",
+          "criterion": "Submitting invalid credentials shows 'Invalid email or password' below the form",
           "met": false
         }
       ],
       "notes": "",
-      "attempt_count": 1
+      "attempt_count": 0
     },
     {
       "id": "3.1.1",

@@ -8,7 +8,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import type { Task, TaskStatus, BacklogFile } from "../types.js";
+import type { Task, TaskStatus, BacklogFile, Story, StoryStatus } from "../types.js";
 
 // =============================================================================
 // Backlog class
@@ -225,5 +225,124 @@ export default class Backlog {
     if (!task) return false;
     if (task.acceptance_criteria.length === 0) return false;
     return task.acceptance_criteria.every((ac) => ac.met === true);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Story operations
+  // ---------------------------------------------------------------------------
+
+  getStoryById(id: string): Story | null {
+    const data = this.read();
+    return (data.stories ?? []).find((s) => s.id === id) ?? null;
+  }
+
+  getStoryByTaskId(taskId: string): Story | null {
+    const data = this.read();
+    const task = data.tasks.find((t) => t.id === taskId);
+    if (!task?.story_id) return null;
+    return (data.stories ?? []).find((s) => s.id === task.story_id) ?? null;
+  }
+
+  updateStoryStatus(id: string, status: StoryStatus): void {
+    const data = this.read();
+    data.stories = (data.stories ?? []).map((s) =>
+      s.id === id ? { ...s, status } : s
+    );
+    this.write(data);
+  }
+
+  appendStoryNotes(id: string, text: string): void {
+    const data = this.read();
+    const timestamp = new Date().toISOString();
+    const entry = `[${timestamp}] ${text}`;
+    data.stories = (data.stories ?? []).map((s) => {
+      if (s.id !== id) return s;
+      const existing = s.notes ?? "";
+      const updated = existing.length > 0 ? `${existing}\n${entry}` : entry;
+      return { ...s, notes: updated };
+    });
+    this.write(data);
+  }
+
+  incrementStoryAttemptCount(id: string): void {
+    const data = this.read();
+    data.stories = (data.stories ?? []).map((s) => {
+      if (s.id !== id) return s;
+      const current = typeof s.attempt_count === "number" ? s.attempt_count : 0;
+      return { ...s, attempt_count: current + 1 };
+    });
+    this.write(data);
+  }
+
+  getStoryAttemptCount(id: string): number {
+    const story = this.getStoryById(id);
+    if (!story) return 0;
+    return typeof story.attempt_count === "number" ? story.attempt_count : 0;
+  }
+
+  updateStoryCriteriaMet(
+    id: string,
+    criteria: Array<{ criterion: string; met: boolean }>
+  ): void {
+    const data = this.read();
+    const incoming = new Map<string, boolean>(
+      criteria.map((c) => [c.criterion, c.met])
+    );
+    data.stories = (data.stories ?? []).map((s) => {
+      if (s.id !== id) return s;
+      return {
+        ...s,
+        acceptance_criteria: s.acceptance_criteria.map((ac) => {
+          if (incoming.has(ac.criterion)) {
+            return { ...ac, met: incoming.get(ac.criterion) as boolean };
+          }
+          return ac;
+        }),
+      };
+    });
+    this.write(data);
+  }
+
+  areAllStoryTasksDone(storyId: string): boolean {
+    const data = this.read();
+    const story = (data.stories ?? []).find((s) => s.id === storyId);
+    if (!story) return false;
+    if (story.task_ids.length === 0) return false;
+    return story.task_ids.every((tid) => {
+      const task = data.tasks.find((t) => t.id === tid);
+      return task?.status === "Done";
+    });
+  }
+
+  resetStoryToTodo(id: string): void {
+    const data = this.read();
+    data.stories = (data.stories ?? []).map((s) => {
+      if (s.id !== id) return s;
+      return {
+        ...s,
+        status: "Todo" as StoryStatus,
+        attempt_count: 0,
+        acceptance_criteria: s.acceptance_criteria.map((ac) => ({
+          ...ac,
+          met: false,
+        })),
+      };
+    });
+    this.write(data);
+  }
+
+  getNextStoryReadyForTesting(): Story | null {
+    const data = this.read();
+    const stories = data.stories ?? [];
+    for (const story of stories) {
+      if (story.status === "Done" || story.status === "Blocked") continue;
+      if (story.task_ids.length === 0) continue;
+      const allDone = story.task_ids.every((tid) => {
+        const task = data.tasks.find((t) => t.id === tid);
+        return task?.status === "Done";
+      });
+      if (allDone && story.status === "Todo") return story;
+    }
+    return null;
   }
 }

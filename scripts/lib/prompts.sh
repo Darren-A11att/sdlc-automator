@@ -21,6 +21,7 @@ load_project_config() {
   DOC_SOLUTION_DESIGN="${PROJECT_DIR}/$(jq -r '.docs.solutionDesign' "$config_file")"
   DOC_PRD="${PROJECT_DIR}/$(jq -r '.docs.prd' "$config_file")"
   DOC_BUSINESS_FLOWS="${PROJECT_DIR}/$(jq -r '.docs.businessFlows' "$config_file")"
+  APPLICATION_URL=$(jq -r '.testing.applicationUrl // empty' "$config_file")
   if [[ -z "$PROJECT_NAME" || "$PROJECT_NAME" == "null" ]]; then
     echo "ERROR: project.json missing required field: project.name" >&2
     exit 1
@@ -39,7 +40,8 @@ Business Flows: ${DOC_BUSINESS_FLOWS}
 Backlog: ${BACKLOG_FILE}
 
 Conventions:
-${CONVENTIONS}
+${CONVENTIONS}$(if [[ -n "${APPLICATION_URL:-}" ]]; then echo "
+Application URL: ${APPLICATION_URL}"; fi)
 EOF
 }
 
@@ -370,5 +372,202 @@ Create a markdown report with:
 3. Each task: ID, name, notes, attempt count
 4. Recommended resolution strategy for each group
 5. Suggested order to unblock tasks
+EOF
+}
+
+_get_test_type_instructions() {
+  local tt="$1"
+  case "$tt" in
+    Unit) cat <<'EOFTI'
+Objective: Verify individual functions/methods behave correctly in isolation.
+- Write and execute unit tests covering: expected inputs, boundary values, null/empty inputs, error conditions.
+- Mock all external dependencies. Report: total tests, passed, failed, coverage %.
+- If no testable units, auto-PASS with a skip note.
+EOFTI
+    ;;
+    Integration) cat <<'EOFTI'
+Objective: Verify components interact correctly with their dependencies.
+- Identify integration points affected by changeset. Test data flows across boundaries.
+- Test both success and failure scenarios. Report: tests run, passed, failed.
+- If no integration points, auto-PASS with a skip note.
+EOFTI
+    ;;
+    Contract) cat <<'EOFTI'
+Objective: Validate API interfaces conform to documented specifications.
+- Compare actual schemas against API docs. Verify status codes, structures, types.
+- Report: schema mismatches, undocumented fields, contract violations.
+- If no API endpoints, auto-PASS with a skip note.
+EOFTI
+    ;;
+    Regression) cat <<'EOFTI'
+Objective: Confirm existing functionality not broken by changes.
+- Execute full automated test suite for affected modules. Compare against baseline.
+- Report: tests run, passed, failed, newly failing tests.
+EOFTI
+    ;;
+    Smoke) cat <<'EOFTI'
+Objective: Quickly verify application is functional and critical paths work.
+- Test startup, health checks, auth flows, three most critical journeys.
+- Report: pass/fail for each critical path.
+EOFTI
+    ;;
+    Security) cat <<'EOFTI'
+Objective: Identify security vulnerabilities in changes.
+- Scan for injection flaws, broken auth, data exposure, insecure configs.
+- Check input sanitisation, authorisation controls, new dependency CVEs.
+- Report: vulnerabilities, severity, remediation suggestions.
+EOFTI
+    ;;
+    Performance) cat <<'EOFTI'
+Objective: Verify changes meet performance expectations.
+- Measure response times for affected endpoints. Flag >20% increase.
+- Check for memory leaks or excessive resource consumption.
+- Report: response times (p50, p95, p99), throughput, error rate.
+EOFTI
+    ;;
+    Accessibility) cat <<'EOFTI'
+Objective: Verify UI changes meet accessibility standards (WCAG 2.1 AA).
+- If no UI changes, auto-PASS with a skip note.
+- Run automated scans, verify keyboard nav, check contrast, ARIA labels.
+- Report: violations, severity, WCAG criterion.
+EOFTI
+    ;;
+    Exploratory) cat <<'EOFTI'
+Objective: Discover edge cases and unexpected behaviours.
+- Test unusual inputs, rapid actions, interrupted workflows.
+- Try to break the feature. Report: unexpected behaviours, steps to reproduce.
+EOFTI
+    ;;
+    UAT) cat <<'EOFTI'
+Objective: Validate feature meets business requirements from end user perspective.
+- Act as end user. Read each acceptance criterion and perform described action.
+- Verify visible outcomes match criteria. Test happy path then alternatives.
+- Report: pass/fail per criterion, usability observations.
+EOFTI
+    ;;
+  esac
+}
+
+build_test_type_system_prompt() {
+  local test_type="$1"
+  local needs_browser="$2"
+  local common_context
+  common_context=$(build_common_context)
+  local instructions
+  instructions=$(_get_test_type_instructions "$test_type")
+  local browser_context=""
+  if [[ "$needs_browser" == "yes" && -n "${APPLICATION_URL:-}" ]]; then
+    browser_context="Browser Testing: Navigate to ${APPLICATION_URL}."
+  elif [[ "$needs_browser" == "optional" && -n "${APPLICATION_URL:-}" ]]; then
+    browser_context="Browser Testing (optional): Available at ${APPLICATION_URL}."
+  fi
+  cat <<EOF
+You are a ${test_type} Tests specialist for ${PROJECT_NAME}.
+
+${common_context}
+${browser_context}
+
+${instructions}
+
+Build: ${BUILD_CMD}  Lint: ${LINT_CMD}
+
+If not applicable, output VERDICT: PASS with skip note.
+
+Output format:
+NOTES_START
+[detailed test notes]
+NOTES_END
+
+VERDICT: PASS or VERDICT: FAIL
+EOF
+}
+
+build_test_type_user_prompt() {
+  local test_type="$1"
+  local task_json="$2"
+  local previous="${3:-}"
+  local tid tname desc notes crit
+  tid=$(echo "$task_json" | jq -r '.id')
+  tname=$(echo "$task_json" | jq -r '.name')
+  desc=$(echo "$task_json" | jq -r '.description')
+  notes=$(echo "$task_json" | jq -r '.notes')
+  crit=$(echo "$task_json" | jq -r '.acceptance_criteria[] | "- " + .criterion')
+  cat <<EOF
+Run ${test_type} Tests for task:
+Task ID: ${tid}  Name: ${tname}
+Description: ${desc}
+Criteria:
+${crit}
+Notes: ${notes}
+${previous:+Previous results: ${previous}}
+EOF
+}
+
+build_story_test_system_prompt() {
+  local test_type="$1"
+  local needs_browser="$2"
+  local common_context
+  common_context=$(build_common_context)
+  local instructions
+  instructions=$(_get_test_type_instructions "$test_type")
+  local browser_context=""
+  if [[ "$needs_browser" == "yes" && -n "${APPLICATION_URL:-}" ]]; then
+    browser_context="Browser Testing: Navigate to ${APPLICATION_URL}."
+  elif [[ "$needs_browser" == "yes" && -z "${APPLICATION_URL:-}" ]]; then
+    browser_context="No applicationUrl configured. Fall back to code-level verification."
+  elif [[ "$needs_browser" == "optional" && -n "${APPLICATION_URL:-}" ]]; then
+    browser_context="Browser Testing (optional): Available at ${APPLICATION_URL}."
+  fi
+  cat <<EOF
+You are a ${test_type} Tests specialist performing story-level testing for ${PROJECT_NAME}.
+
+${common_context}
+${browser_context}
+
+All tasks in this story have passed task-level tests.
+
+${instructions}
+
+Build: ${BUILD_CMD}  Lint: ${LINT_CMD}
+
+If not applicable, output VERDICT: PASS with skip note.
+If a test fails, identify which file(s) caused the issue.
+
+Output format:
+NOTES_START
+[detailed test notes]
+NOTES_END
+
+VERDICT: PASS or VERDICT: FAIL
+EOF
+}
+
+build_story_test_user_prompt() {
+  local test_type="$1"
+  local story_json="$2"
+  local tasks_json="$3"
+  local previous="${4:-}"
+  local sid sname sdesc snotes scrit tsummaries
+  sid=$(echo "$story_json" | jq -r '.id')
+  sname=$(echo "$story_json" | jq -r '.name')
+  sdesc=$(echo "$story_json" | jq -r '.description')
+  snotes=$(echo "$story_json" | jq -r '.notes')
+  scrit=$(echo "$story_json" | jq -r '.acceptance_criteria[] | "- " + .criterion')
+  tsummaries=$(echo "$tasks_json" | jq -r '.[] | "Task \(.id): \(.name)\n  \(.description)\n  Criteria: " + ([.acceptance_criteria[] | .criterion] | join(", "))')
+  local uat_note=""
+  if [[ "$test_type" == "UAT" ]]; then
+    uat_note="IMPORTANT: Execute each story AC literally as a user would."
+  fi
+  cat <<EOF
+Run ${test_type} Tests for story:
+Story ID: ${sid}  Name: ${sname}
+Description: ${sdesc}
+Story Criteria:
+${scrit}
+Child Tasks:
+${tsummaries}
+Notes: ${snotes}
+${previous:+Previous results: ${previous}}
+${uat_note}
 EOF
 }

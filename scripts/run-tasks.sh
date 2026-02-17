@@ -56,6 +56,7 @@ source "${SCRIPTS_DIR}/lib/json-ops.sh"
 source "${SCRIPTS_DIR}/lib/cli-wrapper.sh"
 source "${SCRIPTS_DIR}/lib/format-stream.sh"
 source "${SCRIPTS_DIR}/lib/prompts.sh"
+source "${SCRIPTS_DIR}/lib/test-types.sh"
 
 # --- Load project config ---
 load_project_config
@@ -324,6 +325,155 @@ git_commit_progress() {
     log "INFO" "[$task_id] Progress commit: $stage"
 }
 
+# --- Test orchestrators and story processing ---
+
+_run_single_test_type() {
+    local test_type_key="$1" test_type_label="$2" test_type_max_turns="$3"
+    local test_type_needs_browser="$4" task_json="$5" previous_results="${6:-}"
+    local task_id; task_id=$(echo "$task_json" | jq -r '.id')
+    local task_log_dir; task_log_dir=$(get_task_log_dir "$task_id")
+    log "INFO" "[$task_id] Running ${test_type_label}..."
+    local sys_prompt; sys_prompt=$(build_test_type_system_prompt "$test_type_key" "$test_type_needs_browser")
+    local user_prompt; user_prompt=$(build_test_type_user_prompt "$test_type_key" "$task_json" "$previous_results")
+    local output
+    if output=$(invoke_claude "$MODEL_OPUS" "$test_type_max_turns" "$sys_prompt" "$user_prompt" "${task_log_dir}/test-${test_type_key,,}.log"); then
+        local verdict; verdict=$(parse_verdict "$output")
+        local notes; notes=$(parse_notes "$output")
+        log "INFO" "[$task_id] ${test_type_label}: $verdict"
+        echo "${verdict}|${notes}"; return 0
+    else
+        log "ERROR" "[$task_id] ${test_type_label} agent failed"
+        echo "FAIL|Agent invocation failed"; return 1
+    fi
+}
+
+run_task_test_orchestrator() {
+    local task_json="$1"
+    local task_id; task_id=$(echo "$task_json" | jq -r '.id')
+    local previous_results="" overall_verdict="PASS"
+    for idx in "${TASK_TEST_INDICES[@]}"; do
+        local tt_key="${TEST_TYPE_KEYS[$idx]}" tt_label="${TEST_TYPE_LABELS[$idx]}"
+        local tt_turns="${TEST_TYPE_MAX_TURNS[$idx]}" tt_browser="${TEST_TYPE_NEEDS_BROWSER[$idx]}"
+        update_task_status "$task_id" "Testing:${tt_key}"
+        task_json=$(get_task_by_id "$task_id")
+        local result_line
+        result_line=$(_run_single_test_type "$tt_key" "$tt_label" "$tt_turns" "$tt_browser" "$task_json" "$previous_results") || true
+        local verdict="${result_line%%|*}" notes="${result_line#*|}"
+        previous_results="${previous_results}${tt_key}: ${verdict}. "
+        if [[ "$verdict" == "FAIL" ]]; then
+            local attempt_count; attempt_count=$(get_attempt_count "$task_id")
+            update_task_status "$task_id" "In-Progress"; task_json=$(get_task_by_id "$task_id")
+            local fix_output
+            if fix_output=$(run_fixer "$task_json" "${tt_label} failure: ${notes}" "$attempt_count"); then
+                git_commit_progress "$task_id" "after-${tt_key,,}-fix"
+                update_task_status "$task_id" "Testing:${tt_key}"; task_json=$(get_task_by_id "$task_id")
+                local retry_line
+                retry_line=$(_run_single_test_type "$tt_key" "$tt_label" "$tt_turns" "$tt_browser" "$task_json" "$previous_results") || true
+                if [[ "${retry_line%%|*}" != "PASS" ]]; then
+                    append_task_notes "$task_id" "${tt_label} still failing after fix"
+                    overall_verdict="FAIL"; break
+                fi
+            else
+                append_task_notes "$task_id" "Fixer failed for ${tt_label}"
+                overall_verdict="FAIL"; break
+            fi
+        fi
+    done
+    echo "$overall_verdict"
+}
+
+run_story_test_orchestrator() {
+    local story_json="$1" tasks_json="$2"
+    local story_id; story_id=$(echo "$story_json" | jq -r '.id')
+    local previous_results="" overall_verdict="PASS"
+    for idx in "${STORY_TEST_INDICES[@]}"; do
+        local tt_key="${TEST_TYPE_KEYS[$idx]}" tt_label="${TEST_TYPE_LABELS[$idx]}"
+        local tt_turns="${TEST_TYPE_MAX_TURNS[$idx]}" tt_browser="${TEST_TYPE_NEEDS_BROWSER[$idx]}"
+        update_story_status "$story_id" "Testing:${tt_key}"
+        local sys_prompt; sys_prompt=$(build_story_test_system_prompt "$tt_key" "$tt_browser")
+        local user_prompt; user_prompt=$(build_story_test_user_prompt "$tt_key" "$story_json" "$tasks_json" "$previous_results")
+        local story_log_dir="${LOGS_DIR}/stories/${story_id}"; mkdir -p "$story_log_dir"
+        local output verdict notes
+        if output=$(invoke_claude "$MODEL_OPUS" "$tt_turns" "$sys_prompt" "$user_prompt" "${story_log_dir}/test-${tt_key,,}.log"); then
+            verdict=$(parse_verdict "$output"); notes=$(parse_notes "$output")
+        else
+            verdict="FAIL"; notes="Agent invocation failed"
+        fi
+        log "INFO" "[${story_id}] Story ${tt_label}: $verdict"
+        previous_results="${previous_results}${tt_key}: ${verdict}. "
+        if [[ "$verdict" == "FAIL" ]]; then
+            update_story_status "$story_id" "In-Progress"
+            local fix_sys; fix_sys=$(build_fixer_system_prompt)
+            local scrit; scrit=$(echo "$story_json" | jq -r '.acceptance_criteria[] | "- " + .criterion')
+            local fix_user="Fix story ${tt_label} failure:
+Story: $(echo "$story_json" | jq -r '.name')
+Criteria: ${scrit}
+Failure: ${notes}
+Fix issues. Verify build passes."
+            local fix_output
+            if fix_output=$(invoke_claude "$MODEL_OPUS" "$MAX_TURNS_TEST_FIXER" "$fix_sys" "$fix_user" "${story_log_dir}/fix-${tt_key,,}.log"); then
+                git_commit_progress "$story_id" "after-story-${tt_key,,}-fix"
+                update_story_status "$story_id" "Testing:${tt_key}"
+                story_json=$(get_story_by_id "$story_id")
+                local r_sys; r_sys=$(build_story_test_system_prompt "$tt_key" "$tt_browser")
+                local r_user; r_user=$(build_story_test_user_prompt "$tt_key" "$story_json" "$tasks_json" "$previous_results")
+                local r_out r_verd
+                if r_out=$(invoke_claude "$MODEL_OPUS" "$tt_turns" "$r_sys" "$r_user" "${story_log_dir}/test-${tt_key,,}-retry.log"); then
+                    r_verd=$(parse_verdict "$r_out")
+                else r_verd="FAIL"; fi
+                if [[ "$r_verd" != "PASS" ]]; then
+                    append_story_notes "$story_id" "Story ${tt_label} still failing after fix"
+                    overall_verdict="FAIL"; break
+                fi
+            else
+                append_story_notes "$story_id" "Story fixer failed for ${tt_label}"
+                overall_verdict="FAIL"; break
+            fi
+        fi
+    done
+    echo "$overall_verdict"
+}
+
+process_story() {
+    local story_id="$1"
+    local story_json; story_json=$(get_story_by_id "$story_id")
+    if [[ -z "$story_json" ]]; then log "ERROR" "Story $story_id not found"; return 1; fi
+    local all_done; all_done=$(are_all_story_tasks_done "$story_id")
+    if [[ "$all_done" != "true" ]]; then log "WARN" "[$story_id] Not all tasks Done"; return 1; fi
+    local attempt_count; attempt_count=$(get_story_attempt_count "$story_id")
+    if [[ "$attempt_count" -ge "$MAX_STORY_ATTEMPTS" ]]; then
+        log "WARN" "[$story_id] Max story attempts reached. Blocked."
+        update_story_status "$story_id" "Blocked"
+        append_story_notes "$story_id" "Blocked: exceeded $MAX_STORY_ATTEMPTS attempts"
+        return 1
+    fi
+    increment_story_attempt_count "$story_id"
+    log "INFO" "[$story_id] Processing story (attempt $((attempt_count + 1))/$MAX_STORY_ATTEMPTS)"
+    local task_ids; task_ids=$(echo "$story_json" | jq -r '.task_ids[]')
+    local tasks_json="["; local first=true
+    for tid in $task_ids; do
+        local t; t=$(get_task_by_id "$tid")
+        if [[ -n "$t" ]]; then
+            [[ "$first" == "true" ]] && first=false || tasks_json="${tasks_json},"
+            tasks_json="${tasks_json}${t}"
+        fi
+    done
+    tasks_json="${tasks_json}]"
+    update_story_status "$story_id" "Testing"
+    local story_verdict; story_verdict=$(run_story_test_orchestrator "$story_json" "$tasks_json")
+    if [[ "$story_verdict" == "PASS" ]]; then
+        update_story_status "$story_id" "Done"
+        git_commit_task "$story_id" "$(echo "$story_json" | jq -r '.name')"
+        append_story_notes "$story_id" "Story completed on attempt $((attempt_count + 1))"
+        log "INFO" "[$story_id] DONE - Story completed"
+        return 0
+    fi
+    append_story_notes "$story_id" "Story tests failed on attempt $((attempt_count + 1))"
+    update_story_status "$story_id" "Todo"
+    log "WARN" "[$story_id] Story tests failed. Queued for retry."
+    return 1
+}
+
 # --- Core task processing ---
 
 process_task() {
@@ -409,31 +559,14 @@ process_task() {
         git_commit_progress "$task_id" "after-review-fix"
     fi
 
-    # --- Step 3: Testing ---
+    # --- Step 3: Task-Level Testing (Unit, Integration, Contract) ---
     update_task_status "$task_id" "Testing"
     task_json=$(get_task_by_id "$task_id")
 
-    local test_output
-    if ! test_output=$(run_tester "$task_json"); then
-        append_task_notes "$task_id" "Tester failed on attempt $attempt_count"
-        update_task_status "$task_id" "Todo"
-        CURRENT_TASK_ID=""
-        return 1
-    fi
+    local task_test_verdict
+    task_test_verdict=$(run_task_test_orchestrator "$task_json")
 
-    local test_verdict
-    test_verdict=$(parse_verdict "$test_output")
-    log "INFO" "[$task_id] Test verdict: $test_verdict"
-
-    # Update criteria from test results
-    local criteria_json
-    criteria_json=$(parse_criteria_results "$test_output")
-    if [[ -n "$criteria_json" ]]; then
-        update_criteria_met "$task_id" "$criteria_json"
-    fi
-
-    # If all tests pass, task is Done
-    if [[ "$test_verdict" == "PASS" ]]; then
+    if [[ "$task_test_verdict" == "PASS" ]]; then
         update_task_status "$task_id" "Done"
         task_json=$(get_task_by_id "$task_id")
         task_name=$(echo "$task_json" | jq -r '.name')
@@ -446,67 +579,10 @@ process_task() {
         return 0
     fi
 
-    # Tests failed - try to fix
-    local test_notes
-    test_notes=$(parse_notes "$test_output")
-    if [[ -z "$test_notes" ]]; then
-        # Fall back to full test output if no structured notes
-        test_notes="Test verdict: FAIL. Criteria results: ${criteria_json:-none available}"
-    fi
-    append_task_notes "$task_id" "Test FAIL: $test_notes"
-
-    update_task_status "$task_id" "In-Progress"
-    task_json=$(get_task_by_id "$task_id")
-
-    local fix_output
-    if ! fix_output=$(run_fixer "$task_json" "$test_notes" "$attempt_count"); then
-        append_task_notes "$task_id" "Fixer failed after test on attempt $attempt_count"
-        update_task_status "$task_id" "Todo"
-        CURRENT_TASK_ID=""
-        return 1
-    fi
-    git_commit_progress "$task_id" "after-test-fix"
-
-    # Re-test after fix
-    update_task_status "$task_id" "Testing"
-    task_json=$(get_task_by_id "$task_id")
-
-    local retest_output
-    if ! retest_output=$(run_tester "$task_json"); then
-        append_task_notes "$task_id" "Re-tester failed on attempt $attempt_count"
-        update_task_status "$task_id" "Todo"
-        CURRENT_TASK_ID=""
-        return 1
-    fi
-
-    local retest_verdict
-    retest_verdict=$(parse_verdict "$retest_output")
-    log "INFO" "[$task_id] Re-test verdict: $retest_verdict"
-
-    # Update criteria from re-test
-    local retest_criteria
-    retest_criteria=$(parse_criteria_results "$retest_output")
-    if [[ -n "$retest_criteria" ]]; then
-        update_criteria_met "$task_id" "$retest_criteria"
-    fi
-
-    if [[ "$retest_verdict" == "PASS" ]]; then
-        update_task_status "$task_id" "Done"
-        task_json=$(get_task_by_id "$task_id")
-        task_name=$(echo "$task_json" | jq -r '.name')
-
-        git_commit_task "$task_id" "$task_name"
-
-        append_task_notes "$task_id" "Completed on attempt $attempt_count (after fix)"
-        log "INFO" "[$task_id] DONE - Task completed after fix"
-        CURRENT_TASK_ID=""
-        return 0
-    fi
-
-    # Re-test still failed - task stays for retry on next loop iteration
-    append_task_notes "$task_id" "Re-test still failing on attempt $attempt_count"
+    # Task tests failed
+    append_task_notes "$task_id" "Task tests failed on attempt $attempt_count"
     update_task_status "$task_id" "Todo"
-    log "WARN" "[$task_id] Still failing after attempt $attempt_count. Queued for retry."
+    log "WARN" "[$task_id] Task tests failed on attempt $attempt_count. Queued for retry."
     CURRENT_TASK_ID=""
     return 1
 }
@@ -653,6 +729,23 @@ main() {
         while true; do
             if process_task "$task_id"; then
                 log "INFO" "[$task_id] Task completed successfully"
+
+                # After task Done, check if parent story is ready for testing
+                local story_json
+                story_json=$(get_story_by_task_id "$task_id")
+                if [[ -n "$story_json" ]]; then
+                    local story_id
+                    story_id=$(echo "$story_json" | jq -r '.id')
+                    local story_status
+                    story_status=$(echo "$story_json" | jq -r '.status')
+                    local all_done
+                    all_done=$(are_all_story_tasks_done "$story_id")
+                    if [[ "$all_done" == "true" && "$story_status" != "Done" ]]; then
+                        log "INFO" "[$story_id] All tasks Done. Starting story-level testing..."
+                        process_story "$story_id" || true
+                    fi
+                fi
+
                 break
             fi
 

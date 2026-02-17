@@ -143,3 +143,72 @@ check_all_criteria_passed() {
         end
     ' "$BACKLOG_FILE"
 }
+
+# =============================================================================
+# Story operations
+# =============================================================================
+
+get_story_by_id() {
+    jq --arg id "$1" '(.stories // [])[] | select(.id == $id)' "$BACKLOG_FILE"
+}
+
+get_story_by_task_id() {
+    local task_id="$1"
+    local story_id
+    story_id=$(jq -r --arg id "$task_id" '.tasks[] | select(.id == $id) | .story_id // empty' "$BACKLOG_FILE")
+    if [[ -z "$story_id" ]]; then
+        echo ""
+        return
+    fi
+    get_story_by_id "$story_id"
+}
+
+update_story_status() {
+    local story_id="$1"
+    local new_status="$2"
+    update_backlog --arg id "$story_id" --arg status "$new_status" \
+        '.stories = [(.stories // [])[] | if .id == $id then .status = $status else . end]'
+}
+
+append_story_notes() {
+    local story_id="$1"
+    local note_text="$2"
+    local timestamp
+    timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    update_backlog --arg id "$story_id" --arg timestamp "$timestamp" --arg note "$note_text" \
+        '.stories = [(.stories // [])[] | if .id == $id then .notes = ((.notes // "") + "\n[" + $timestamp + "] " + $note) else . end]'
+}
+
+increment_story_attempt_count() {
+    local story_id="$1"
+    update_backlog --arg id "$story_id" \
+        '.stories = [(.stories // [])[] | if .id == $id then .attempt_count = (if .attempt_count then .attempt_count + 1 else 1 end) else . end]'
+}
+
+get_story_attempt_count() {
+    local story_id="$1"
+    jq --arg id "$1" '(.stories // [])[] | select(.id == $id) | .attempt_count // 0' "$BACKLOG_FILE"
+}
+
+are_all_story_tasks_done() {
+    local story_id="$1"
+    jq --arg id "$story_id" '
+        ((.stories // [])[] | select(.id == $id) | .task_ids) as $tids |
+        if ($tids | length) == 0 then false
+        else ($tids | all(. as $tid | any(.tasks[]; .id == $tid and .status == "Done")))
+        end
+    ' "$BACKLOG_FILE"
+}
+
+reset_story_to_todo() {
+    local story_id="$1"
+    update_backlog --arg id "$story_id" \
+        '.stories = [(.stories // [])[] | if .id == $id then .status = "Todo" | .attempt_count = 0 | .acceptance_criteria |= map(.met = false) else . end]'
+}
+
+update_story_criteria_met() {
+    local story_id="$1"
+    local criteria_json="$2"
+    update_backlog --arg id "$story_id" --argjson criteria "$criteria_json" \
+        '.stories = [(.stories // [])[] | if .id == $id then .acceptance_criteria |= map(. as $ac | ($criteria | map(select(.criterion == $ac.criterion)) | first) as $update | if $update then .met = $update.met else . end) else . end]'
+}

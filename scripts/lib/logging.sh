@@ -89,7 +89,7 @@ print_summary() {
     todo_count=$(jq '[.tasks[] | select(.status == "Todo")] | length' "$backlog_file")
     in_progress_count=$(jq '[.tasks[] | select(.status == "In-Progress")] | length' "$backlog_file")
     review_count=$(jq '[.tasks[] | select(.status == "Review")] | length' "$backlog_file")
-    testing_count=$(jq '[.tasks[] | select(.status == "Testing")] | length' "$backlog_file")
+    testing_count=$(jq '[.tasks[] | select(.status == "Testing" or (.status | startswith("Testing:")))] | length' "$backlog_file")
     total_count=$(jq '[.tasks[]] | length' "$backlog_file")
 
     # Print formatted table
@@ -104,6 +104,30 @@ print_summary() {
     printf "%-15s %5s\n" "---------------" "-----"
     printf "%-15s %5d\n" "Total" "$total_count"
     echo ""
+
+    # Story summary (if stories exist)
+    local story_count
+    story_count=$(jq '(.stories // []) | length' "$backlog_file")
+    if [[ "$story_count" -gt 0 ]]; then
+        echo "=== Story Summary ==="
+        echo ""
+        local s_done s_inprog s_testing s_todo s_blocked
+        s_done=$(jq '[(.stories // [])[] | select(.status == "Done")] | length' "$backlog_file")
+        s_inprog=$(jq '[(.stories // [])[] | select(.status == "In-Progress")] | length' "$backlog_file")
+        s_testing=$(jq '[(.stories // [])[] | select(.status == "Testing" or (.status | startswith("Testing:")))] | length' "$backlog_file")
+        s_todo=$(jq '[(.stories // [])[] | select(.status == "Todo")] | length' "$backlog_file")
+        s_blocked=$(jq '[(.stories // [])[] | select(.status == "Blocked")] | length' "$backlog_file")
+        printf "%-15s %5s\n" "Status" "Count"
+        printf "%-15s %5s\n" "---------------" "-----"
+        printf "%-15s %5d\n" "Done" "$s_done"
+        printf "%-15s %5d\n" "In-Progress" "$s_inprog"
+        printf "%-15s %5d\n" "Testing" "$s_testing"
+        printf "%-15s %5d\n" "Todo" "$s_todo"
+        printf "%-15s %5d\n" "Blocked" "$s_blocked"
+        printf "%-15s %5s\n" "---------------" "-----"
+        printf "%-15s %5d\n" "Total" "$story_count"
+        echo ""
+    fi
 }
 
 # Print usage information for the run-tasks.sh script
