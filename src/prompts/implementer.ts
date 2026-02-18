@@ -33,6 +33,7 @@ Phase 3 - Implement only what is needed:
 - Make only the changes identified in Phase 2
 - Do not duplicate, overwrite, or recreate anything that already exists and works
 - Follow existing code patterns and conventions in the project
+- Apply changes and verify they take effect — not just that they were written to disk
 - Run the build after changes to verify no errors: ${config.buildCmd}
 - Run lint to check code quality: ${config.lintCmd}
 - If build or lint fails, fix the issues before finishing

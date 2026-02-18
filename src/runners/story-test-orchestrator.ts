@@ -7,9 +7,10 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { MODEL_OPUS, MAX_TURNS_TEST_FIXER, ALLOWED_TOOLS, STORY_TEST_TYPES } from "../config.js";
+import { MODEL_OPUS, MAX_TURNS_TEST_FIXER, MAX_TURNS_TESTER_BROWSER, ALLOWED_TOOLS, ALLOWED_TOOLS_BROWSER, STORY_TEST_TYPES } from "../config.js";
 import type { TestTypeConfig } from "../config.js";
 import { invokeClaudeAgent } from "../agents/index.js";
+import type { McpStdioServerConfig } from "../agents/types.js";
 import { buildStoryTestSystemPrompt, buildStoryTestUserPrompt } from "../prompts/tester.js";
 import { buildFixerSystemPrompt } from "../prompts/fixer.js";
 import { parseVerdict } from "../parsers/verdict.js";
@@ -31,25 +32,37 @@ async function runSingleStoryTest(
   previousResults: TestTypeResult[],
   logger: Logger,
   verbose: boolean,
+  devServerRunning: boolean,
+  mcpServers?: Record<string, McpStdioServerConfig>,
 ): Promise<TestTypeResult> {
   const startTime = Date.now();
   const logDir = path.join(logger.logsDir, "stories", story.id);
   fs.mkdirSync(logDir, { recursive: true });
 
-  logger.log("INFO", `[${story.id}] Running story ${testType.label}...`);
+  // Determine if this test should use browser tools
+  const useBrowser = testType.requiresBrowser !== false && devServerRunning && mcpServers !== undefined;
+  const effectiveTools = useBrowser ? ALLOWED_TOOLS_BROWSER : ALLOWED_TOOLS;
+  const effectiveMaxTurns = useBrowser ? MAX_TURNS_TESTER_BROWSER : testType.maxTurns;
+
+  if (useBrowser) {
+    logger.log("INFO", `[${story.id}] Running story ${testType.label} (browser-enabled)...`);
+  } else {
+    logger.log("INFO", `[${story.id}] Running story ${testType.label}...`);
+  }
 
   const sysPrompt = buildStoryTestSystemPrompt(testType, config, backlogFile);
   const userPrompt = buildStoryTestUserPrompt(testType, story, tasks, previousResults);
 
   const result = await invokeClaudeAgent({
     model: MODEL_OPUS,
-    maxTurns: testType.maxTurns,
+    maxTurns: effectiveMaxTurns,
     systemPrompt: sysPrompt,
     userPrompt,
     logFile: path.join(logDir, `test-${testType.name.toLowerCase()}.log`),
     cwd: config.projectDir,
     verbose,
-    allowedTools: ALLOWED_TOOLS,
+    allowedTools: effectiveTools,
+    ...(useBrowser && mcpServers ? { mcpServers } : {}),
   });
 
   const durationMs = Date.now() - startTime;
@@ -223,6 +236,8 @@ export async function runStoryTestOrchestrator(
   logger: Logger,
   verbose: boolean,
   reportsDir: string,
+  devServerRunning = false,
+  mcpServers?: Record<string, McpStdioServerConfig>,
 ): Promise<TestOrchestrationResult> {
   const results: TestTypeResult[] = [];
   let overallVerdict: Verdict = "PASS";
@@ -236,7 +251,7 @@ export async function runStoryTestOrchestrator(
 
     // Run the test type
     let result = await runSingleStoryTest(
-      testType, story, tasks, config, backlogFile, results, logger, verbose,
+      testType, story, tasks, config, backlogFile, results, logger, verbose, devServerRunning, mcpServers,
     );
 
     // If failed, try to fix and re-run once
@@ -256,7 +271,7 @@ export async function runStoryTestOrchestrator(
         backlog.updateStoryStatus(story.id, `Testing:${testType.statusSuffix}`);
         const retryStory = backlog.getStoryById(story.id)!;
         const retryResult = await runSingleStoryTest(
-          testType, retryStory, tasks, config, backlogFile, results, logger, verbose,
+          testType, retryStory, tasks, config, backlogFile, results, logger, verbose, devServerRunning, mcpServers,
         );
 
         if (retryResult.verdict === "PASS") {

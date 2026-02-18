@@ -27,6 +27,7 @@ export async function invokeClaudeAgent(options: AgentOptions): Promise<AgentRes
     cwd,
     verbose,
     allowedTools,
+    mcpServers,
   } = options;
 
   // Ensure log directory exists
@@ -54,6 +55,7 @@ export async function invokeClaudeAgent(options: AgentOptions): Promise<AgentRes
         permissionMode: "bypassPermissions",
         allowDangerouslySkipPermissions: true,
         cwd,
+        ...(mcpServers ? { mcpServers } : {}),
       },
     });
 

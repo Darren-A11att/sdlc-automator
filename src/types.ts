@@ -104,6 +104,13 @@ export interface TestOrchestrationResult {
   reportPath?: string;
 }
 
+export interface DevServerConfig {
+  startCommand: string;
+  port: number;
+  readinessTimeoutSeconds: number;
+  readinessIntervalSeconds: number;
+}
+
 export interface ProjectConfig {
   projectName: string;
   techStack: string;
@@ -115,6 +122,8 @@ export interface ProjectConfig {
   docBusinessFlows: string;
   projectDir: string;
   applicationUrl?: string;
+  devServer?: DevServerConfig;
+  mcpConfigPath?: string;
 }
 
 export interface AgentResult {

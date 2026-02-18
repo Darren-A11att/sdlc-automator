@@ -22,6 +22,13 @@
     "lintCommand": "The command agents run to check code quality, e.g. 'npm run lint'"
   },
   "testing": {
-    "applicationUrl": "OPTIONAL: URL where the deployed app is accessible for browser-based tests (UAT, Smoke, etc.), e.g. 'http://localhost:3000'"
+    "applicationUrl": "OPTIONAL: URL where the deployed app is accessible for browser-based tests (UAT, Smoke, etc.), e.g. 'http://localhost:3000'",
+    "devServer": {
+      "startCommand": "OPTIONAL: Command to start the dev server, e.g. 'npm run dev'",
+      "port": 3000,
+      "readinessTimeoutSeconds": 60,
+      "readinessIntervalSeconds": 2
+    },
+    "mcpConfig": "OPTIONAL: Path to MCP server config for browser testing, e.g. 'templates/mcp-puppeteer.json'"
   }
 }

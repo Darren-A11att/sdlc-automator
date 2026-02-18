@@ -22,6 +22,22 @@ load_project_config() {
   DOC_PRD="${PROJECT_DIR}/$(jq -r '.docs.prd' "$config_file")"
   DOC_BUSINESS_FLOWS="${PROJECT_DIR}/$(jq -r '.docs.businessFlows' "$config_file")"
   APPLICATION_URL=$(jq -r '.testing.applicationUrl // empty' "$config_file")
+
+  # Dev server config (optional — when absent, all DEV_SERVER vars are empty)
+  DEV_SERVER_START_CMD=$(jq -r '.testing.devServer.startCommand // empty' "$config_file")
+  DEV_SERVER_PORT=$(jq -r '.testing.devServer.port // empty' "$config_file")
+  DEV_SERVER_READINESS_TIMEOUT=$(jq -r '.testing.devServer.readinessTimeoutSeconds // empty' "$config_file")
+  DEV_SERVER_READINESS_INTERVAL=$(jq -r '.testing.devServer.readinessIntervalSeconds // empty' "$config_file")
+
+  # MCP Puppeteer config path (optional — resolved relative to project root)
+  local mcp_config_rel
+  mcp_config_rel=$(jq -r '.testing.mcpConfig // empty' "$config_file")
+  if [[ -n "$mcp_config_rel" ]]; then
+    MCP_PUPPETEER_CONFIG="${PROJECT_DIR}/${mcp_config_rel}"
+  else
+    MCP_PUPPETEER_CONFIG=""
+  fi
+
   if [[ -z "$PROJECT_NAME" || "$PROJECT_NAME" == "null" ]]; then
     echo "ERROR: project.json missing required field: project.name" >&2
     exit 1
@@ -75,6 +91,7 @@ Phase 3 - Implement only what is needed:
 - Make only the changes identified in Phase 2
 - Do not duplicate, overwrite, or recreate anything that already exists and works
 - Follow existing code patterns and conventions in the project
+- Apply changes and verify they take effect — not just that they were written to disk
 - Run the build after changes to verify no errors: ${BUILD_CMD}
 - Run lint to check code quality: ${LINT_CMD}
 - If build or lint fails, fix the issues before finishing
@@ -122,18 +139,48 @@ build_reviewer_system_prompt() {
   local common_context
   common_context=$(build_common_context)
 
+  local smoke_test_dev_server=""
+  if [[ -n "${DEV_SERVER_START_CMD:-}" ]]; then
+    smoke_test_dev_server="
+- Start the dev server and verify it starts without errors, then stop it"
+  fi
+
   cat <<EOF
 You are a senior code reviewer for ${PROJECT_NAME}.
 
 ${common_context}
 
-Review the implementation for:
+Your review follows 5 phases. Complete each phase before moving to the next.
+
+Phase 0 — Smoke test (do this FIRST):
+- Run: ${BUILD_CMD}${smoke_test_dev_server}
+- Record any failures as immediate findings
+- Continue the review even if the smoke test fails
+
+Phase 1 — Understand the intended outcome:
+- Read the task description and determine the expected user-visible outcome
+- Search project docs (${DOC_SOLUTION_DESIGN}, ${DOC_PRD}, ${DOC_BUSINESS_FLOWS}) for relevant rules or requirements
+- Check related tasks in the backlog for integration context
+- Determine the minimum set of requirements to achieve the described outcome
+
+Phase 2 — Assess acceptance criteria completeness:
+- Compare the listed acceptance criteria against the minimum requirements from Phase 1
+- Identify any gaps: requirements implied by the story description or project docs that the acceptance criteria do not cover
+- Document gaps as review findings
+
+Phase 3 — Find the implementation:
+- Use grep/glob with MULTIPLE alternative search terms to locate the implementation
+- Do NOT limit your search to files_changed — check for missing routes, components, or files that should exist
+- Verify each acceptance criterion has corresponding implementation
+
+Phase 4 — Code review:
 1. All acceptance criteria are met
-2. Code follows project conventions and patterns
-3. No security vulnerabilities (XSS, injection, auth bypass)
-4. TypeScript types are correct and strict
-5. Error handling is appropriate
-6. No unused imports or dead code
+2. All minimum requirements from Phase 1 are met (including any A/C gaps identified in Phase 2)
+3. Code follows project conventions and patterns
+4. No security vulnerabilities (XSS, injection, auth bypass)
+5. TypeScript types are correct and strict
+6. Error handling is appropriate
+7. No unused imports or dead code
 
 Output format - end your response with:
 NOTES_START
@@ -155,11 +202,15 @@ build_reviewer_user_prompt() {
   task_name=$(echo "$task_json" | jq -r '.name')
   criteria=$(echo "$task_json" | jq -r '.acceptance_criteria[] | "- " + .criterion')
 
+  local description
+  description=$(echo "$task_json" | jq -r '.description')
+
   cat <<EOF
 Review the implementation of this task:
 
 Task ID: ${task_id}
 Task Name: ${task_name}
+Description: ${description}
 
 Acceptance Criteria:
 ${criteria}
@@ -167,9 +218,27 @@ ${criteria}
 Files changed:
 ${files_changed}
 
-Read each changed file and verify the implementation meets all criteria.
-Check for security issues, type errors, and convention violations.
-Run: ${BUILD_CMD} && ${LINT_CMD}
+Follow the 5-phase review process:
+
+1. SMOKE TEST: Run ${BUILD_CMD} and record results.
+
+2. UNDERSTAND INTENT: Read the task description and search project docs to understand the expected outcome. Determine minimum requirements.
+
+3. ASSESS A/C COMPLETENESS: Compare acceptance criteria against minimum requirements. Note any gaps.
+
+4. FIND IMPLEMENTATION: Search the codebase using multiple search terms. Do not rely solely on files_changed.
+
+5. CODE REVIEW: Verify each acceptance criterion is met, check conventions, security, types, and error handling.
+
+6. VERIFY: Run ${BUILD_CMD} && ${LINT_CMD}
+
+7. If any A/C gaps from step 3 are not implemented, include them in your findings.
+
+8. Report everything in NOTES_START/NOTES_END markers.
+
+9. Give your final VERDICT: PASS or VERDICT: FAIL.
+
+10. Include specific file paths and line numbers for any issues found.
 EOF
 }
 
@@ -246,9 +315,15 @@ You are a senior developer fixing issues found during review/testing of ${PROJEC
 
 ${common_context}
 
-Instructions:
-- Read the failure notes carefully
-- Fix ONLY the issues identified - do not refactor unrelated code
+Root cause analysis (do this BEFORE making any code changes):
+- Read the failure notes AND acceptance criteria together
+- Identify the root causes — not just the symptoms
+- Check related tasks in the backlog for context or dependencies
+- Consult project docs (${DOC_SOLUTION_DESIGN}, ${DOC_PRD}, ${DOC_BUSINESS_FLOWS}) when failures involve business logic
+- If A/C gaps were identified in review notes, implement what is needed to match the documented intent
+
+Then apply fixes:
+- Fix ONLY the issues identified — do not refactor unrelated code
 - Verify your fixes by running: ${BUILD_CMD} && ${LINT_CMD}
 - If the build or lint fails after your fixes, keep fixing until they pass
 
@@ -268,11 +343,15 @@ build_fixer_user_prompt() {
   task_name=$(echo "$task_json" | jq -r '.name')
   criteria=$(echo "$task_json" | jq -r '.acceptance_criteria[] | "- " + .criterion')
 
+  local description
+  description=$(echo "$task_json" | jq -r '.description')
+
   cat <<EOF
 Fix the following issues found in task implementation:
 
 Task ID: ${task_id}
 Task Name: ${task_name}
+Description: ${description}
 
 Acceptance Criteria:
 ${criteria}
@@ -280,7 +359,13 @@ ${criteria}
 Issues to fix:
 ${failure_notes}
 
-Fix these specific issues. Do not change unrelated code. Verify build passes after fixes.
+Follow this process:
+1. Read the failure notes and acceptance criteria together to understand the full context.
+2. Identify root causes — what is actually wrong, not just the surface symptom.
+3. Check the backlog and project docs if the issue involves business logic or cross-task dependencies.
+4. Apply targeted fixes for each root cause.
+5. Verify build passes after all changes: ${BUILD_CMD} && ${LINT_CMD}
+6. If any A/C gaps were noted, implement the missing functionality.
 EOF
 }
 
@@ -448,6 +533,42 @@ EOFTI
   esac
 }
 
+_get_browser_testing_instructions() {
+  local app_url="$1"
+  cat <<EOFBROWSER
+Browser Testing Instructions (when dev server is available):
+
+1. Navigate using mcp__puppeteer__puppeteer_navigate
+   - Determine the correct route from acceptance criteria + source code
+   - Start at ${app_url} and navigate to the relevant route
+
+2. Verify rendering:
+   - Use mcp__puppeteer__puppeteer_screenshot to capture the page
+   - Check that expected text, buttons, links, and form fields are visible
+   - Name screenshots descriptively: "<task_id>-<description>"
+
+3. Test interactions:
+   - Use mcp__puppeteer__puppeteer_click for buttons and links
+   - Use mcp__puppeteer__puppeteer_fill for form fields
+   - Use mcp__puppeteer__puppeteer_select for dropdowns
+   - Take a screenshot after each interaction to verify results
+
+4. Verify navigation:
+   - Click navigation links and verify URL changes
+   - Test direct URL access to routes
+
+5. Check runtime errors:
+   - Use mcp__puppeteer__puppeteer_evaluate to check for JavaScript errors
+   - Verify actual content is rendered (not a blank or error page)
+
+Limitations — do NOT do any of the following:
+- Do NOT submit authentication forms (email verification, OAuth)
+- Do NOT enter real credentials
+- Do NOT test external services (Stripe, email providers, etc.)
+- Do NOT fail solely because an external service is unavailable
+EOFBROWSER
+}
+
 build_test_type_system_prompt() {
   local test_type="$1"
   local needs_browser="$2"
@@ -457,9 +578,10 @@ build_test_type_system_prompt() {
   instructions=$(_get_test_type_instructions "$test_type")
   local browser_context=""
   if [[ "$needs_browser" == "yes" && -n "${APPLICATION_URL:-}" ]]; then
-    browser_context="Browser Testing: Navigate to ${APPLICATION_URL}."
+    browser_context=$(_get_browser_testing_instructions "$APPLICATION_URL")
   elif [[ "$needs_browser" == "optional" && -n "${APPLICATION_URL:-}" ]]; then
-    browser_context="Browser Testing (optional): Available at ${APPLICATION_URL}."
+    browser_context="Browser Testing (optional): Available at ${APPLICATION_URL}.
+$(_get_browser_testing_instructions "$APPLICATION_URL")"
   fi
   cat <<EOF
 You are a ${test_type} Tests specialist for ${PROJECT_NAME}.
@@ -512,11 +634,12 @@ build_story_test_system_prompt() {
   instructions=$(_get_test_type_instructions "$test_type")
   local browser_context=""
   if [[ "$needs_browser" == "yes" && -n "${APPLICATION_URL:-}" ]]; then
-    browser_context="Browser Testing: Navigate to ${APPLICATION_URL}."
+    browser_context=$(_get_browser_testing_instructions "$APPLICATION_URL")
   elif [[ "$needs_browser" == "yes" && -z "${APPLICATION_URL:-}" ]]; then
     browser_context="No applicationUrl configured. Fall back to code-level verification."
   elif [[ "$needs_browser" == "optional" && -n "${APPLICATION_URL:-}" ]]; then
-    browser_context="Browser Testing (optional): Available at ${APPLICATION_URL}."
+    browser_context="Browser Testing (optional): Available at ${APPLICATION_URL}.
+$(_get_browser_testing_instructions "$APPLICATION_URL")"
   fi
   cat <<EOF
 You are a ${test_type} Tests specialist performing story-level testing for ${PROJECT_NAME}.

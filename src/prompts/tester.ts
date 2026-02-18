@@ -161,6 +161,42 @@ const TEST_TYPE_INSTRUCTIONS: Record<TestTypeName, string> = {
 - Report: pass/fail for each acceptance criterion and any usability observations.`,
 };
 
+/**
+ * Detailed Puppeteer browser testing instructions for test agents.
+ */
+function getBrowserTestingInstructions(applicationUrl: string): string {
+  return `Browser Testing Instructions (when dev server is available):
+
+1. Navigate using mcp__puppeteer__puppeteer_navigate
+   - Determine the correct route from acceptance criteria + source code
+   - Start at ${applicationUrl} and navigate to the relevant route
+
+2. Verify rendering:
+   - Use mcp__puppeteer__puppeteer_screenshot to capture the page
+   - Check that expected text, buttons, links, and form fields are visible
+   - Name screenshots descriptively: "<task_id>-<description>"
+
+3. Test interactions:
+   - Use mcp__puppeteer__puppeteer_click for buttons and links
+   - Use mcp__puppeteer__puppeteer_fill for form fields
+   - Use mcp__puppeteer__puppeteer_select for dropdowns
+   - Take a screenshot after each interaction to verify results
+
+4. Verify navigation:
+   - Click navigation links and verify URL changes
+   - Test direct URL access to routes
+
+5. Check runtime errors:
+   - Use mcp__puppeteer__puppeteer_evaluate to check for JavaScript errors
+   - Verify actual content is rendered (not a blank or error page)
+
+Limitations — do NOT do any of the following:
+- Do NOT submit authentication forms (email verification, OAuth)
+- Do NOT enter real credentials
+- Do NOT test external services (Stripe, email providers, etc.)
+- Do NOT fail solely because an external service is unavailable`;
+}
+
 // =============================================================================
 // Task-level test prompt builders
 // =============================================================================
@@ -175,9 +211,9 @@ export function buildTestTypeSystemPrompt(
 
   let browserContext = "";
   if (testType.requiresBrowser === true && config.applicationUrl) {
-    browserContext = `\nBrowser Testing: Open a browser and navigate to ${config.applicationUrl} to perform this test.`;
+    browserContext = `\n${getBrowserTestingInstructions(config.applicationUrl)}`;
   } else if (testType.requiresBrowser === "optional" && config.applicationUrl) {
-    browserContext = `\nBrowser Testing (optional): If needed, the application is available at ${config.applicationUrl}.`;
+    browserContext = `\nBrowser Testing (optional): If needed, the application is available at ${config.applicationUrl}.\n${getBrowserTestingInstructions(config.applicationUrl)}`;
   }
 
   return `You are a ${testType.label} specialist for ${config.projectName}.
@@ -247,11 +283,11 @@ export function buildStoryTestSystemPrompt(
 
   let browserContext = "";
   if (testType.requiresBrowser === true && config.applicationUrl) {
-    browserContext = `\nBrowser Testing: Open a browser and navigate to ${config.applicationUrl} to perform this test.`;
+    browserContext = `\n${getBrowserTestingInstructions(config.applicationUrl)}`;
   } else if (testType.requiresBrowser === true && !config.applicationUrl) {
     browserContext = `\nBrowser Testing: No applicationUrl is configured. Fall back to code-level verification of the story acceptance criteria.`;
   } else if (testType.requiresBrowser === "optional" && config.applicationUrl) {
-    browserContext = `\nBrowser Testing (optional): If needed, the application is available at ${config.applicationUrl}.`;
+    browserContext = `\nBrowser Testing (optional): If needed, the application is available at ${config.applicationUrl}.\n${getBrowserTestingInstructions(config.applicationUrl)}`;
   }
 
   return `You are a ${testType.label} specialist performing story-level testing for ${config.projectName}.

@@ -22,6 +22,24 @@ export function loadProjectConfig(projectDir: string): ProjectConfig {
   }
   const conventions = (raw.conventions || []).map((c: string) => `- ${c}`).join("\n");
   const applicationUrl: string | undefined = raw.testing?.applicationUrl || undefined;
+
+  // Parse optional dev server config
+  const rawDevServer = raw.testing?.devServer;
+  const devServer = rawDevServer?.startCommand
+    ? {
+        startCommand: rawDevServer.startCommand,
+        port: rawDevServer.port ?? 3000,
+        readinessTimeoutSeconds: rawDevServer.readinessTimeoutSeconds ?? 60,
+        readinessIntervalSeconds: rawDevServer.readinessIntervalSeconds ?? 2,
+      }
+    : undefined;
+
+  // Parse optional MCP config path (resolve relative to project root)
+  const rawMcpConfig: string | undefined = raw.testing?.mcpConfig || undefined;
+  const mcpConfigPath = rawMcpConfig
+    ? path.resolve(projectDir, rawMcpConfig)
+    : undefined;
+
   return {
     projectName,
     techStack: raw.techStack || "",
@@ -33,6 +51,8 @@ export function loadProjectConfig(projectDir: string): ProjectConfig {
     docBusinessFlows: path.join(projectDir, raw.docs?.businessFlows || "docs/business-flows.md"),
     projectDir,
     applicationUrl,
+    devServer,
+    mcpConfigPath,
   };
 }
 

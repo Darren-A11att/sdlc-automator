@@ -29,6 +29,21 @@ export const MAX_TURNS_REPORTER = 10;
 /** Default allowed tools for all agents */
 export const ALLOWED_TOOLS = ["Bash", "Read", "Edit", "Write", "Glob", "Grep"];
 
+/** Max turns for browser-based testing (more turns needed for Puppeteer interactions) */
+export const MAX_TURNS_TESTER_BROWSER = 25;
+
+/** Allowed tools including MCP Puppeteer tools for browser-based testing */
+export const ALLOWED_TOOLS_BROWSER = [
+  ...ALLOWED_TOOLS,
+  "mcp__puppeteer__puppeteer_navigate",
+  "mcp__puppeteer__puppeteer_screenshot",
+  "mcp__puppeteer__puppeteer_click",
+  "mcp__puppeteer__puppeteer_fill",
+  "mcp__puppeteer__puppeteer_select",
+  "mcp__puppeteer__puppeteer_hover",
+  "mcp__puppeteer__puppeteer_evaluate",
+];
+
 /** Configuration for a single test type */
 export interface TestTypeConfig {
   name: TestTypeName;

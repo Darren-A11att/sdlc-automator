@@ -16,9 +16,15 @@ export function buildFixerSystemPrompt(
 
 ${commonContext}
 
-Instructions:
-- Read the failure notes carefully
-- Fix ONLY the issues identified - do not refactor unrelated code
+Root cause analysis (do this BEFORE making any code changes):
+- Read the failure notes AND acceptance criteria together
+- Identify the root causes — not just the symptoms
+- Check related tasks in the backlog for context or dependencies
+- Consult project docs (${config.docSolutionDesign}, ${config.docPrd}, ${config.docBusinessFlows}) when failures involve business logic
+- If A/C gaps were identified in review notes, implement what is needed to match the documented intent
+
+Then apply fixes:
+- Fix ONLY the issues identified — do not refactor unrelated code
 - Verify your fixes by running: ${config.buildCmd} && ${config.lintCmd}
 - If the build or lint fails after your fixes, keep fixing until they pass
 
@@ -36,6 +42,7 @@ export function buildFixerUserPrompt(task: Task, failureNotes: string): string {
 
 Task ID: ${task.id}
 Task Name: ${task.name}
+Description: ${task.description}
 
 Acceptance Criteria:
 ${criteria}
@@ -43,5 +50,11 @@ ${criteria}
 Issues to fix:
 ${failureNotes}
 
-Fix these specific issues. Do not change unrelated code. Verify build passes after fixes.`;
+Follow this process:
+1. Read the failure notes and acceptance criteria together to understand the full context.
+2. Identify root causes — what is actually wrong, not just the surface symptom.
+3. Check the backlog and project docs if the issue involves business logic or cross-task dependencies.
+4. Apply targeted fixes for each root cause.
+5. Run ${task.notes ? "build and lint" : "build and lint"} to verify fixes: verify build passes after all changes.
+6. If any A/C gaps were noted, implement the missing functionality.`;
 }

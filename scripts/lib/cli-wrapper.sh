@@ -26,6 +26,7 @@ invoke_agent() {
 #   $3: system_prompt (string - the system prompt to append)
 #   $4: user_prompt (string - the actual prompt/task)
 #   $5: log_file (path to save full output)
+#   $6: mcp_config (optional, path to MCP JSON config file)
 # Returns:
 #   0 on success, 1 on failure
 # Output:
@@ -36,8 +37,15 @@ invoke_claude() {
   local system_prompt="$3"
   local user_prompt="$4"
   local log_file="$5"
+  local mcp_config="${6:-}"
 
-  log "DEBUG" "Invoking Claude CLI: model=$model, max_turns=$max_turns, log_file=$log_file, verbose=$VERBOSE"
+  log "DEBUG" "Invoking Claude CLI: model=$model, max_turns=$max_turns, log_file=$log_file, verbose=$VERBOSE${mcp_config:+, mcp_config=$mcp_config}"
+
+  # Build optional MCP args
+  local mcp_args=()
+  if [[ -n "$mcp_config" && -f "$mcp_config" ]]; then
+    mcp_args=(--mcp-config "$mcp_config")
+  fi
 
   local output
   local result
@@ -51,6 +59,7 @@ invoke_claude() {
       --allowedTools "$ALLOWED_TOOLS" \
       --append-system-prompt "$system_prompt" \
       --dangerously-skip-permissions \
+      "${mcp_args[@]}" \
       2>&1 | format_stream_claude)
 
     echo "$output" > "$log_file"
@@ -71,6 +80,7 @@ invoke_claude() {
       --allowedTools "$ALLOWED_TOOLS" \
       --append-system-prompt "$system_prompt" \
       --dangerously-skip-permissions \
+      "${mcp_args[@]}" \
       2>&1)
 
     echo "$output" > "$log_file"

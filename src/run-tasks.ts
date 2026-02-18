@@ -10,6 +10,9 @@ import fs from "node:fs";
 import path from "node:path";
 import Backlog from "./backlog/backlog.js";
 import { MAX_CONSECUTIVE_BLOCKS } from "./config.js";
+import type { McpStdioServerConfig } from "./agents/types.js";
+import { DevServer } from "./devserver/dev-server.js";
+import { loadMcpConfig } from "./devserver/mcp-config.js";
 import Logger from "./logging/logger.js";
 import { processTask } from "./pipeline/process-task.js";
 import { processStory } from "./pipeline/process-story.js";
@@ -66,10 +69,15 @@ function parseArgs(args: string[]): ParsedArgs {
 }
 
 // --- Signal handler ---
-function setupCleanup(backlog: Backlog, logger: Logger): void {
+function setupCleanup(backlog: Backlog, logger: Logger, devServer?: DevServer): void {
   const cleanup = () => {
     console.log("");
     logger.log("WARN", "Interrupt received. Cleaning up...");
+
+    // Stop dev server if we started it
+    if (devServer) {
+      devServer.stop();
+    }
 
     // Clean up any temp files from atomic writes
     try {
@@ -124,157 +132,199 @@ async function main(): Promise<void> {
   // Initialize backlog
   const backlog = new Backlog(BACKLOG_FILE);
 
-  // Setup signal handlers
-  setupCleanup(backlog, logger);
+  // --- Dev server + MCP setup ---
+  let devServer: DevServer | undefined;
+  let devServerRunning = false;
+  let mcpServers: Record<string, McpStdioServerConfig> | undefined;
+
+  if (config.devServer) {
+    devServer = new DevServer(
+      config.devServer,
+      config.projectDir,
+      path.join(LOGS_DIR, "dev-server", "dev-server.log"),
+      logger,
+    );
+  }
+
+  if (config.mcpConfigPath) {
+    mcpServers = loadMcpConfig(config.mcpConfigPath);
+    if (Object.keys(mcpServers).length === 0) {
+      logger.log("WARN", `MCP config at ${config.mcpConfigPath} has no servers`);
+      mcpServers = undefined;
+    } else {
+      logger.log("INFO", `Loaded MCP servers: ${Object.keys(mcpServers).join(", ")}`);
+    }
+  }
+
+  // Setup signal handlers (pass devServer for cleanup)
+  setupCleanup(backlog, logger, devServer);
 
   logger.log("INFO", "=== SDLC Task Loop Started ===");
   logger.log("INFO", `Backlog: ${BACKLOG_FILE}`);
   logger.log("INFO", `CLI Provider: ${args.cliProvider}`);
   logger.log("INFO", `Verbose: ${args.verbose}`);
-
-  // Handle --retry mode
-  if (args.retryTaskId) {
-    logger.log("INFO", `Retry mode: resetting task ${args.retryTaskId}`);
-    if (!backlog.validateTaskExists(args.retryTaskId)) {
-      logger.log("ERROR", `Task ${args.retryTaskId} not found`);
-      process.exit(1);
-    }
-    backlog.resetTaskToTodo(args.retryTaskId);
-    logger.log("INFO", `Task ${args.retryTaskId} reset to Todo`);
-
-    await processTask(args.retryTaskId, backlog, config, BACKLOG_FILE, logger, args.cliProvider, args.verbose, REPORTS_DIR);
-    logger.printSummary();
-    logger.log("INFO", `Session ended. Log: ${logger.sessionLogFile}`);
-    return;
+  if (config.devServer) {
+    logger.log("INFO", `Dev server: ${config.devServer.startCommand} (port ${config.devServer.port})`);
   }
 
-  // Main processing loop
-  let consecutiveBlocks = 0;
+  // Start dev server if configured
+  if (devServer) {
+    devServerRunning = await devServer.start();
+    if (!devServerRunning) {
+      logger.log("WARN", "Dev server failed to start — browser tests will run without Puppeteer");
+    }
+  }
 
-  // Handle --start-from mode
-  if (args.startFromTaskId) {
-    logger.log("INFO", `Start-from mode: will skip until task ${args.startFromTaskId}`);
-    if (!backlog.validateTaskExists(args.startFromTaskId)) {
-      logger.log("ERROR", `Task ${args.startFromTaskId} not found`);
-      process.exit(1);
+  try {
+    // Handle --retry mode
+    if (args.retryTaskId) {
+      logger.log("INFO", `Retry mode: resetting task ${args.retryTaskId}`);
+      if (!backlog.validateTaskExists(args.retryTaskId)) {
+        logger.log("ERROR", `Task ${args.retryTaskId} not found`);
+        process.exit(1);
+      }
+      backlog.resetTaskToTodo(args.retryTaskId);
+      logger.log("INFO", `Task ${args.retryTaskId} reset to Todo`);
+
+      await processTask(args.retryTaskId, backlog, config, BACKLOG_FILE, logger, args.cliProvider, args.verbose, REPORTS_DIR, devServerRunning, mcpServers);
+      logger.printSummary();
+      logger.log("INFO", `Session ended. Log: ${logger.sessionLogFile}`);
+      return;
     }
 
-    // Skip tasks until we find the target
-    const skippedIds: string[] = [];
-    let found = false;
+    // Main processing loop
+    let consecutiveBlocks = 0;
 
-    while (true) {
-      const nextTask = backlog.getNextTodoTask();
-      if (!nextTask) {
-        logger.log("ERROR", `Reached end of Todo tasks without finding ${args.startFromTaskId}`);
-        // Restore skipped tasks
-        for (const id of skippedIds) {
-          backlog.updateTaskStatus(id, "Todo");
-        }
+    // Handle --start-from mode
+    if (args.startFromTaskId) {
+      logger.log("INFO", `Start-from mode: will skip until task ${args.startFromTaskId}`);
+      if (!backlog.validateTaskExists(args.startFromTaskId)) {
+        logger.log("ERROR", `Task ${args.startFromTaskId} not found`);
         process.exit(1);
       }
 
-      if (nextTask.id === args.startFromTaskId) {
-        // Restore skipped tasks
-        for (const id of skippedIds) {
-          backlog.updateTaskStatus(id, "Todo");
-        }
-        logger.log("INFO", `Found start-from task: ${nextTask.id}`);
-        found = true;
-        break;
-      }
+      // Skip tasks until we find the target
+      const skippedIds: string[] = [];
+      let found = false;
 
-      // Temporarily mark as In-Progress to skip it
-      backlog.updateTaskStatus(nextTask.id, "In-Progress");
-      skippedIds.push(nextTask.id);
-    }
-
-    if (!found) {
-      process.exit(1);
-    }
-  }
-
-  while (true) {
-    // Get next Todo task
-    const nextTask = backlog.getNextTodoTask();
-
-    if (!nextTask) {
-      logger.log("INFO", "No more Todo tasks found. Pipeline complete.");
-      break;
-    }
-
-    const taskId = nextTask.id;
-    currentTaskId = taskId;
-
-    // Check for blockers before processing
-    const blockedTasks = backlog.getBlockedTasks();
-
-    if (blockedTasks.length > 0) {
-      logger.log("INFO", `[${taskId}] Checking against ${blockedTasks.length} blocked tasks...`);
-      const blockerVerdict = await runBlockerAnalysis(
-        nextTask, blockedTasks, config, BACKLOG_FILE, logger, args.verbose,
-      );
-
-      if (blockerVerdict === "BLOCKED") {
-        logger.log("WARN", `[${taskId}] Blocked by previously blocked tasks`);
-        backlog.updateTaskStatus(taskId, "Blocked");
-        backlog.appendTaskNotes(taskId, "Blocked: dependency on previously blocked task(s)");
-        consecutiveBlocks += 1;
-
-        if (consecutiveBlocks >= MAX_CONSECUTIVE_BLOCKS) {
-          logger.log("ERROR", `Hit ${MAX_CONSECUTIVE_BLOCKS} consecutive blocked tasks. Generating report and stopping.`);
-          const allBlocked = backlog.getBlockedTasks();
-          await runBlockReporter(allBlocked, config, BACKLOG_FILE, logger, LOGS_DIR, REPORTS_DIR, args.verbose);
-          logger.printSummary();
-          logger.log("INFO", `Session ended. Log: ${logger.sessionLogFile}`);
+      while (true) {
+        const nextTask = backlog.getNextTodoTask();
+        if (!nextTask) {
+          logger.log("ERROR", `Reached end of Todo tasks without finding ${args.startFromTaskId}`);
+          // Restore skipped tasks
+          for (const id of skippedIds) {
+            backlog.updateTaskStatus(id, "Todo");
+          }
           process.exit(1);
         }
 
-        continue;
-      }
-    }
-
-    // Reset consecutive blocks counter on a clear task
-    consecutiveBlocks = 0;
-
-    // Process the task — retry until it reaches a terminal state
-    while (true) {
-      const success = await processTask(
-        taskId, backlog, config, BACKLOG_FILE, logger, args.cliProvider, args.verbose, REPORTS_DIR,
-      );
-
-      if (success) {
-        logger.log("INFO", `[${taskId}] Task completed successfully`);
-
-        // After task Done, check if parent story is ready for testing
-        const story = backlog.getStoryByTaskId(taskId);
-        if (story && backlog.areAllStoryTasksDone(story.id) && story.status !== "Done") {
-          logger.log("INFO", `[${story.id}] All tasks Done. Starting story-level testing...`);
-          await processStory(story.id, backlog, config, BACKLOG_FILE, logger, args.verbose, REPORTS_DIR);
+        if (nextTask.id === args.startFromTaskId) {
+          // Restore skipped tasks
+          for (const id of skippedIds) {
+            backlog.updateTaskStatus(id, "Todo");
+          }
+          logger.log("INFO", `Found start-from task: ${nextTask.id}`);
+          found = true;
+          break;
         }
 
-        break;
+        // Temporarily mark as In-Progress to skip it
+        backlog.updateTaskStatus(nextTask.id, "In-Progress");
+        skippedIds.push(nextTask.id);
       }
 
-      // Check if task reached a terminal state despite returning failure
-      const updatedTask = backlog.getTaskById(taskId);
-      const taskStatus = updatedTask?.status;
-
-      if (taskStatus === "Done" || taskStatus === "Blocked") {
-        logger.log("INFO", `[${taskId}] Task reached terminal state: ${taskStatus}`);
-        break;
+      if (!found) {
+        process.exit(1);
       }
-
-      logger.log("WARN", `[${taskId}] Not completed (status: ${taskStatus}), retrying...`);
-      await new Promise(resolve => setTimeout(resolve, 2000));
     }
 
-    currentTaskId = "";
-  }
+    while (true) {
+      // Get next Todo task
+      const nextTask = backlog.getNextTodoTask();
 
-  // End of loop - print final summary
-  logger.printSummary();
-  logger.log("INFO", `Session ended. Log: ${logger.sessionLogFile}`);
+      if (!nextTask) {
+        logger.log("INFO", "No more Todo tasks found. Pipeline complete.");
+        break;
+      }
+
+      const taskId = nextTask.id;
+      currentTaskId = taskId;
+
+      // Check for blockers before processing
+      const blockedTasks = backlog.getBlockedTasks();
+
+      if (blockedTasks.length > 0) {
+        logger.log("INFO", `[${taskId}] Checking against ${blockedTasks.length} blocked tasks...`);
+        const blockerVerdict = await runBlockerAnalysis(
+          nextTask, blockedTasks, config, BACKLOG_FILE, logger, args.verbose,
+        );
+
+        if (blockerVerdict === "BLOCKED") {
+          logger.log("WARN", `[${taskId}] Blocked by previously blocked tasks`);
+          backlog.updateTaskStatus(taskId, "Blocked");
+          backlog.appendTaskNotes(taskId, "Blocked: dependency on previously blocked task(s)");
+          consecutiveBlocks += 1;
+
+          if (consecutiveBlocks >= MAX_CONSECUTIVE_BLOCKS) {
+            logger.log("ERROR", `Hit ${MAX_CONSECUTIVE_BLOCKS} consecutive blocked tasks. Generating report and stopping.`);
+            const allBlocked = backlog.getBlockedTasks();
+            await runBlockReporter(allBlocked, config, BACKLOG_FILE, logger, LOGS_DIR, REPORTS_DIR, args.verbose);
+            logger.printSummary();
+            logger.log("INFO", `Session ended. Log: ${logger.sessionLogFile}`);
+            process.exit(1);
+          }
+
+          continue;
+        }
+      }
+
+      // Reset consecutive blocks counter on a clear task
+      consecutiveBlocks = 0;
+
+      // Process the task — retry until it reaches a terminal state
+      while (true) {
+        const success = await processTask(
+          taskId, backlog, config, BACKLOG_FILE, logger, args.cliProvider, args.verbose, REPORTS_DIR, devServerRunning, mcpServers,
+        );
+
+        if (success) {
+          logger.log("INFO", `[${taskId}] Task completed successfully`);
+
+          // After task Done, check if parent story is ready for testing
+          const story = backlog.getStoryByTaskId(taskId);
+          if (story && backlog.areAllStoryTasksDone(story.id) && story.status !== "Done") {
+            logger.log("INFO", `[${story.id}] All tasks Done. Starting story-level testing...`);
+            await processStory(story.id, backlog, config, BACKLOG_FILE, logger, args.verbose, REPORTS_DIR, devServerRunning, mcpServers);
+          }
+
+          break;
+        }
+
+        // Check if task reached a terminal state despite returning failure
+        const updatedTask = backlog.getTaskById(taskId);
+        const taskStatus = updatedTask?.status;
+
+        if (taskStatus === "Done" || taskStatus === "Blocked") {
+          logger.log("INFO", `[${taskId}] Task reached terminal state: ${taskStatus}`);
+          break;
+        }
+
+        logger.log("WARN", `[${taskId}] Not completed (status: ${taskStatus}), retrying...`);
+        await new Promise(resolve => setTimeout(resolve, 2000));
+      }
+
+      currentTaskId = "";
+    }
+
+    // End of loop - print final summary
+    logger.printSummary();
+    logger.log("INFO", `Session ended. Log: ${logger.sessionLogFile}`);
+  } finally {
+    // Always stop dev server on exit
+    if (devServer) {
+      devServer.stop();
+    }
+  }
 }
 
 main().catch(err => {

@@ -39,6 +39,10 @@ MAX_TURNS_REPORTER=10
 # Default allowed tools for all agents
 ALLOWED_TOOLS="Bash,Read,Edit,Write,Glob,Grep"
 
+# Browser-aware tools (includes MCP Puppeteer)
+ALLOWED_TOOLS_BROWSER="${ALLOWED_TOOLS},mcp__puppeteer__puppeteer_navigate,mcp__puppeteer__puppeteer_screenshot,mcp__puppeteer__puppeteer_click,mcp__puppeteer__puppeteer_fill,mcp__puppeteer__puppeteer_select,mcp__puppeteer__puppeteer_hover,mcp__puppeteer__puppeteer_evaluate"
+MAX_TURNS_TESTER_BROWSER=25
+
 # CLI provider (default: claude; set to "kimi" via --cli-kimi)
 CLI_PROVIDER="claude"
 
@@ -57,15 +61,22 @@ source "${SCRIPTS_DIR}/lib/cli-wrapper.sh"
 source "${SCRIPTS_DIR}/lib/format-stream.sh"
 source "${SCRIPTS_DIR}/lib/prompts.sh"
 source "${SCRIPTS_DIR}/lib/test-types.sh"
+source "${SCRIPTS_DIR}/lib/dev-server.sh"
 
 # --- Load project config ---
 load_project_config
+
+# --- Dev server state ---
+DEV_SERVER_RUNNING=false
 
 # --- Signal handler ---
 cleanup() {
     local exit_code=$?
     echo ""
     log "WARN" "Interrupt received. Cleaning up..."
+
+    # Stop dev server if we started it
+    stop_dev_server
 
     # Clean up any temp files from atomic writes
     rm -f "${BACKLOG_FILE}.tmp."*
@@ -332,17 +343,37 @@ _run_single_test_type() {
     local test_type_needs_browser="$4" task_json="$5" previous_results="${6:-}"
     local task_id; task_id=$(echo "$task_json" | jq -r '.id')
     local task_log_dir; task_log_dir=$(get_task_log_dir "$task_id")
-    log "INFO" "[$task_id] Running ${test_type_label}..."
+
+    # Determine if browser-enabled invocation is needed
+    local effective_tools="$ALLOWED_TOOLS"
+    local effective_max_turns="$test_type_max_turns"
+    local mcp_config_arg=""
+    if [[ "$test_type_needs_browser" != "no" && "$DEV_SERVER_RUNNING" == "true" && -n "${MCP_PUPPETEER_CONFIG:-}" && -f "${MCP_PUPPETEER_CONFIG:-}" ]]; then
+        effective_tools="$ALLOWED_TOOLS_BROWSER"
+        effective_max_turns="$MAX_TURNS_TESTER_BROWSER"
+        mcp_config_arg="$MCP_PUPPETEER_CONFIG"
+        log "INFO" "[$task_id] Running ${test_type_label} (browser-enabled)..."
+    else
+        log "INFO" "[$task_id] Running ${test_type_label}..."
+    fi
+
     local sys_prompt; sys_prompt=$(build_test_type_system_prompt "$test_type_key" "$test_type_needs_browser")
     local user_prompt; user_prompt=$(build_test_type_user_prompt "$test_type_key" "$task_json" "$previous_results")
+
+    # Temporarily override ALLOWED_TOOLS for this invocation
+    local saved_tools="$ALLOWED_TOOLS"
+    ALLOWED_TOOLS="$effective_tools"
+
     local output
-    if output=$(invoke_claude "$MODEL_OPUS" "$test_type_max_turns" "$sys_prompt" "$user_prompt" "${task_log_dir}/test-${test_type_key,,}.log"); then
+    if output=$(invoke_claude "$MODEL_OPUS" "$effective_max_turns" "$sys_prompt" "$user_prompt" "${task_log_dir}/test-${test_type_key,,}.log" "$mcp_config_arg"); then
         local verdict; verdict=$(parse_verdict "$output")
         local notes; notes=$(parse_notes "$output")
         log "INFO" "[$task_id] ${test_type_label}: $verdict"
+        ALLOWED_TOOLS="$saved_tools"
         echo "${verdict}|${notes}"; return 0
     else
         log "ERROR" "[$task_id] ${test_type_label} agent failed"
+        ALLOWED_TOOLS="$saved_tools"
         echo "FAIL|Agent invocation failed"; return 1
     fi
 }
@@ -390,11 +421,18 @@ run_story_test_orchestrator() {
         local tt_key="${TEST_TYPE_KEYS[$idx]}" tt_label="${TEST_TYPE_LABELS[$idx]}"
         local tt_turns="${TEST_TYPE_MAX_TURNS[$idx]}" tt_browser="${TEST_TYPE_NEEDS_BROWSER[$idx]}"
         update_story_status "$story_id" "Testing:${tt_key}"
+        # Determine browser-enabled invocation
+        local effective_tools="$ALLOWED_TOOLS" effective_turns="$tt_turns" mcp_config_arg=""
+        if [[ "$tt_browser" != "no" && "$DEV_SERVER_RUNNING" == "true" && -n "${MCP_PUPPETEER_CONFIG:-}" && -f "${MCP_PUPPETEER_CONFIG:-}" ]]; then
+            effective_tools="$ALLOWED_TOOLS_BROWSER"; effective_turns="$MAX_TURNS_TESTER_BROWSER"
+            mcp_config_arg="$MCP_PUPPETEER_CONFIG"
+        fi
         local sys_prompt; sys_prompt=$(build_story_test_system_prompt "$tt_key" "$tt_browser")
         local user_prompt; user_prompt=$(build_story_test_user_prompt "$tt_key" "$story_json" "$tasks_json" "$previous_results")
         local story_log_dir="${LOGS_DIR}/stories/${story_id}"; mkdir -p "$story_log_dir"
+        local saved_tools="$ALLOWED_TOOLS"; ALLOWED_TOOLS="$effective_tools"
         local output verdict notes
-        if output=$(invoke_claude "$MODEL_OPUS" "$tt_turns" "$sys_prompt" "$user_prompt" "${story_log_dir}/test-${tt_key,,}.log"); then
+        if output=$(invoke_claude "$MODEL_OPUS" "$effective_turns" "$sys_prompt" "$user_prompt" "${story_log_dir}/test-${tt_key,,}.log" "$mcp_config_arg"); then
             verdict=$(parse_verdict "$output"); notes=$(parse_notes "$output")
         else
             verdict="FAIL"; notes="Agent invocation failed"
@@ -418,18 +456,21 @@ Fix issues. Verify build passes."
                 local r_sys; r_sys=$(build_story_test_system_prompt "$tt_key" "$tt_browser")
                 local r_user; r_user=$(build_story_test_user_prompt "$tt_key" "$story_json" "$tasks_json" "$previous_results")
                 local r_out r_verd
-                if r_out=$(invoke_claude "$MODEL_OPUS" "$tt_turns" "$r_sys" "$r_user" "${story_log_dir}/test-${tt_key,,}-retry.log"); then
+                if r_out=$(invoke_claude "$MODEL_OPUS" "$effective_turns" "$r_sys" "$r_user" "${story_log_dir}/test-${tt_key,,}-retry.log" "$mcp_config_arg"); then
                     r_verd=$(parse_verdict "$r_out")
                 else r_verd="FAIL"; fi
                 if [[ "$r_verd" != "PASS" ]]; then
                     append_story_notes "$story_id" "Story ${tt_label} still failing after fix"
+                    ALLOWED_TOOLS="$saved_tools"
                     overall_verdict="FAIL"; break
                 fi
             else
                 append_story_notes "$story_id" "Story fixer failed for ${tt_label}"
+                ALLOWED_TOOLS="$saved_tools"
                 overall_verdict="FAIL"; break
             fi
         fi
+        ALLOWED_TOOLS="$saved_tools"
     done
     echo "$overall_verdict"
 }
@@ -606,6 +647,16 @@ main() {
     log "INFO" "Backlog: $BACKLOG_FILE"
     log "INFO" "CLI Provider: $CLI_PROVIDER"
     log "INFO" "Verbose: $VERBOSE"
+
+    # Start dev server if configured
+    if [[ -n "${DEV_SERVER_START_CMD:-}" ]]; then
+        log "INFO" "Dev server: ${DEV_SERVER_START_CMD} (port ${DEV_SERVER_PORT:-3000})"
+        if start_dev_server; then
+            DEV_SERVER_RUNNING=true
+        else
+            log "WARN" "Dev server failed to start — browser tests will run without Puppeteer"
+        fi
+    fi
 
     # Handle --retry mode
     if [[ -n "${RETRY_TASK_ID:-}" ]]; then

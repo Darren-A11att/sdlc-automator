@@ -8,6 +8,7 @@
 
 import Backlog from "../backlog/backlog.js";
 import { MAX_STORY_ATTEMPTS } from "../config.js";
+import type { McpStdioServerConfig } from "../agents/types.js";
 import { runStoryTestOrchestrator } from "../runners/story-test-orchestrator.js";
 import { gitCommitTask } from "./git.js";
 import type { ProjectConfig } from "../types.js";
@@ -28,6 +29,8 @@ export async function processStory(
   logger: Logger,
   verbose: boolean,
   reportsDir: string,
+  devServerRunning = false,
+  mcpServers?: Record<string, McpStdioServerConfig>,
 ): Promise<boolean> {
   const story = backlog.getStoryById(storyId);
   if (!story) {
@@ -64,7 +67,7 @@ export async function processStory(
 
   // Run story-level test orchestration
   const storyTestResult = await runStoryTestOrchestrator(
-    story, tasks, config, backlogFile, backlog, logger, verbose, reportsDir,
+    story, tasks, config, backlogFile, backlog, logger, verbose, reportsDir, devServerRunning, mcpServers,
   );
 
   if (storyTestResult.overallVerdict === "PASS") {

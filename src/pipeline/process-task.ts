@@ -1,5 +1,6 @@
 import Backlog from "../backlog/backlog.js";
 import { MAX_ATTEMPTS } from "../config.js";
+import type { McpStdioServerConfig } from "../agents/types.js";
 import { parseVerdict } from "../parsers/verdict.js";
 import { parseNotes } from "../parsers/notes.js";
 import { runImplementer } from "../runners/implementer.js";
@@ -29,6 +30,8 @@ export async function processTask(
   cliProvider: CliProvider,
   verbose: boolean,
   reportsDir: string,
+  devServerRunning = false,
+  mcpServers?: Record<string, McpStdioServerConfig>,
 ): Promise<boolean> {
   // Fetch fresh task data
   let task = backlog.getTaskById(taskId);
@@ -103,7 +106,7 @@ export async function processTask(
   task = backlog.getTaskById(taskId)!;
 
   const taskTestResult = await runTaskTestOrchestrator(
-    task, config, backlogFile, backlog, logger, verbose, reportsDir,
+    task, config, backlogFile, backlog, logger, verbose, reportsDir, devServerRunning, mcpServers,
   );
 
   if (taskTestResult.overallVerdict === "PASS") {
