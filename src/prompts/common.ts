@@ -40,6 +40,12 @@ export function loadProjectConfig(projectDir: string): ProjectConfig {
     ? path.resolve(projectDir, rawMcpConfig)
     : undefined;
 
+  // Parse optional epic brief path (resolve relative to project root)
+  const rawEpicBrief: string | undefined = raw.docs?.epicBrief || undefined;
+  const epicBriefPath = rawEpicBrief
+    ? path.resolve(projectDir, rawEpicBrief)
+    : undefined;
+
   return {
     projectName,
     techStack: raw.techStack || "",
@@ -49,10 +55,12 @@ export function loadProjectConfig(projectDir: string): ProjectConfig {
     docSolutionDesign: path.join(projectDir, raw.docs?.solutionDesign || "docs/solution-design.md"),
     docPrd: path.join(projectDir, raw.docs?.prd || "docs/prd.md"),
     docBusinessFlows: path.join(projectDir, raw.docs?.businessFlows || "docs/business-flows.md"),
+    docSystemDiagram: path.join(projectDir, raw.docs?.systemDiagram || "docs/system-diagram.md"),
     projectDir,
     applicationUrl,
     devServer,
     mcpConfigPath,
+    epicBriefPath,
   };
 }
 
@@ -63,6 +71,7 @@ Project Root: ${config.projectDir}
 Solution Design: ${config.docSolutionDesign}
 PRD: ${config.docPrd}
 Business Flows: ${config.docBusinessFlows}
+System Diagram: ${config.docSystemDiagram}
 Backlog: ${backlogFile}
 
 Conventions:

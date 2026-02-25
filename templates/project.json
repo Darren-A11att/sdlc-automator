@@ -15,7 +15,8 @@
     "solutionDesign": "docs/solution-design.md",
     "prd": "docs/prd.md",
     "businessFlows": "docs/business-flows.md",
-    "systemDiagram": "docs/system-diagram.md"
+    "systemDiagram": "docs/system-diagram.md",
+    "epicBrief": "OPTIONAL: Path to epic/feature brief for documentation-first phase, e.g. 'docs/epic-v2.md'"
   },
   "build": {
     "buildCommand": "The command agents run to verify builds, e.g. 'npm run build'",

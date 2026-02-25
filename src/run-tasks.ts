@@ -19,6 +19,8 @@ import { processStory } from "./pipeline/process-story.js";
 import { loadProjectConfig } from "./prompts/common.js";
 import { runBlockerAnalysis } from "./runners/blocker-analysis.js";
 import { runBlockReporter } from "./runners/block-reporter.js";
+import { runDocUpdaterPhase } from "./runners/doc-updater.js";
+import { gitCommitDocs } from "./pipeline/git.js";
 import type { CliProvider } from "./types.js";
 
 // --- Resolve paths ---
@@ -36,6 +38,7 @@ interface ParsedArgs {
   startFromTaskId: string;
   cliProvider: CliProvider;
   verbose: boolean;
+  epicBriefPath: string;
 }
 
 function parseArgs(args: string[]): ParsedArgs {
@@ -44,6 +47,7 @@ function parseArgs(args: string[]): ParsedArgs {
     startFromTaskId: "",
     cliProvider: "claude",
     verbose: true,
+    epicBriefPath: "",
   };
 
   for (const arg of args) {
@@ -55,6 +59,8 @@ function parseArgs(args: string[]): ParsedArgs {
       result.retryTaskId = arg.slice("--retry:".length);
     } else if (arg.startsWith("--start-from:")) {
       result.startFromTaskId = arg.slice("--start-from:".length);
+    } else if (arg.startsWith("--epic-brief:")) {
+      result.epicBriefPath = arg.slice("--epic-brief:".length);
     } else if (arg === "--cli-kimi") {
       result.cliProvider = "kimi";
     } else if (arg === "--verbose") {
@@ -176,6 +182,17 @@ async function main(): Promise<void> {
   }
 
   try {
+    // --- Documentation-First Phase ---
+    // Resolve epic brief path: CLI arg takes precedence over project.json
+    const epicBriefPath = args.epicBriefPath
+      ? path.resolve(PROJECT_DIR, args.epicBriefPath)
+      : config.epicBriefPath || "";
+
+    if (epicBriefPath) {
+      await runDocUpdaterPhase(config, BACKLOG_FILE, epicBriefPath, logger, args.verbose);
+      gitCommitDocs(config.projectName, config.projectDir, logger);
+    }
+
     // Handle --retry mode
     if (args.retryTaskId) {
       logger.log("INFO", `Retry mode: resetting task ${args.retryTaskId}`);

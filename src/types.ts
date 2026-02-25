@@ -120,10 +120,12 @@ export interface ProjectConfig {
   docSolutionDesign: string;
   docPrd: string;
   docBusinessFlows: string;
+  docSystemDiagram: string;
   projectDir: string;
   applicationUrl?: string;
   devServer?: DevServerConfig;
   mcpConfigPath?: string;
+  epicBriefPath?: string;
 }
 
 export interface AgentResult {

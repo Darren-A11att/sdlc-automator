@@ -25,6 +25,10 @@ export const MAX_TURNS_FIXER = 20;
 export const MAX_TURNS_TEST_FIXER = 15;
 export const MAX_TURNS_BLOCKER = 5;
 export const MAX_TURNS_REPORTER = 10;
+export const MAX_TURNS_DOC_UPDATER = 15;
+
+/** Model for doc-updater agents (Sonnet for cost efficiency — structured writing, not deep analysis) */
+export const MODEL_DOC_UPDATER = MODEL_SONNET;
 
 /** Default allowed tools for all agents */
 export const ALLOWED_TOOLS = ["Bash", "Read", "Edit", "Write", "Glob", "Grep"];

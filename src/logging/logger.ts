@@ -175,6 +175,7 @@ Options:
   --start-from:<task_id> Start processing from a specific task ID
   --cli-kimi            Use Kimi Code CLI instead of Claude Code CLI
   --verbose             Stream real-time agent output to terminal
+  --epic-brief:<path>   Run doc-first phase using the given epic brief
 
 Examples:
   npx tsx src/run-tasks.ts                        Process from first Todo task

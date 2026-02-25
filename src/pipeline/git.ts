@@ -60,6 +60,39 @@ export function gitCommitProgress(taskId: string, stage: string, projectDir: str
   }
 }
 
+/**
+ * Create a commit for the documentation-first phase.
+ * Format: docs: update project documentation for <epic-name>
+ */
+export function gitCommitDocs(epicName: string, projectDir: string, logger: Logger): void {
+  logger.log("INFO", "Creating docs commit...");
+
+  try {
+    execSync("git add -A", { cwd: projectDir, stdio: "pipe" });
+
+    try {
+      execSync("git diff --cached --quiet", { cwd: projectDir, stdio: "pipe" });
+      logger.log("WARN", "No doc changes to commit");
+      return;
+    } catch {
+      // Has changes — continue
+    }
+
+    const commitMsg = `docs: update project documentation for ${epicName}\n\nAutomated SDLC pipeline - documentation-first phase.\n\nCo-Authored-By: Claude <noreply@anthropic.com>`;
+    execSync(`git commit -m ${escapeShellArg(commitMsg)}`, { cwd: projectDir, stdio: "pipe" });
+    logger.log("INFO", "Docs commit created");
+
+    try {
+      execSync("git push", { cwd: projectDir, stdio: "pipe" });
+      logger.log("INFO", "Pushed docs to remote");
+    } catch {
+      logger.log("WARN", "Push docs to remote failed");
+    }
+  } catch (err) {
+    logger.log("WARN", `Docs commit failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
 function escapeShellArg(arg: string): string {
   return `'${arg.replace(/'/g, "'\\''")}'`;
 }

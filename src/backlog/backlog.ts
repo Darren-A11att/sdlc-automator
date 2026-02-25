@@ -61,6 +61,13 @@ export default class Backlog {
   // ---------------------------------------------------------------------------
 
   /**
+   * Returns all tasks in the backlog.
+   */
+  getAllTasks(): Task[] {
+    return this.read().tasks;
+  }
+
+  /**
    * Returns the first task whose status is "Todo", or null if none exists.
    * Ports: get_next_todo_task()
    *   jq '[.tasks[] | select(.status == "Todo")] | first // empty'

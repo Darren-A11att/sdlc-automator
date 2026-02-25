@@ -8,6 +8,10 @@ A generic, project-agnostic SDLC automation pipeline. Processes tasks from a JSO
 
 ### Pipeline Flow
 ```
+[Phase 0: Doc-First (optional, --epic-brief:path)]
+  Epic Brief + Backlog → 4 parallel doc-updater agents (Sonnet) → Updated docs → Git commit
+
+[Phase 1: Task Processing Loop]
 Todo → In-Progress (Implementer/Sonnet) → Review (Reviewer/Opus) → Testing (Tester/Opus) → Done
                                               ↓ FAIL                       ↓ FAIL
                                          Fixer (Opus) →                Fixer (Opus) → Re-test
@@ -197,6 +201,7 @@ npx tsx src/run-tasks.ts --retry:4.22.100          # Reset and retry specific ta
 npx tsx src/run-tasks.ts --start-from:5.30.150     # Start from specific task
 npx tsx src/run-tasks.ts --cli-kimi                # Use Kimi for implementation
 npx tsx src/run-tasks.ts --verbose                 # Stream real-time output (default)
+npx tsx src/run-tasks.ts --epic-brief:docs/epic.md # Run doc-first phase before tasks
 npx tsc --noEmit                                   # Type check
 ```
 
@@ -224,6 +229,7 @@ src/
     fixer.ts
     blocker-analyst.ts
     block-reporter.ts
+    doc-updater.ts              ← buildDocUpdaterSystemPrompt/UserPrompt(), persona definitions
 
   runners/
     implementer.ts              ← runImplementer() (replaces bash function)
@@ -232,10 +238,11 @@ src/
     fixer.ts
     blocker-analysis.ts
     block-reporter.ts
+    doc-updater.ts              ← runDocUpdaterPhase() — parallel doc update orchestrator
 
   pipeline/
     process-task.ts             ← processTask() core pipeline logic
-    git.ts                      ← gitCommitTask(), gitCommitProgress()
+    git.ts                      ← gitCommitTask(), gitCommitProgress(), gitCommitDocs()
 
   logging/
     logger.ts                   ← Logger class (replaces scripts/lib/logging.sh)
