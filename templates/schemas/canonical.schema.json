@@ -1,0 +1,168 @@
+{
+  "_description": "Canonical schema reference for SDLC Automator backlogs. Used by the compatibility checker and the auto-mapping agent. This is a structural reference, not a JSON Schema.",
+  "root": {
+    "fields": {
+      "schema": {
+        "type": "object",
+        "required": false,
+        "description": "Optional metadata about valid status and met values"
+      },
+      "stories": {
+        "type": "array<Story>",
+        "required": false,
+        "description": "Optional array of user stories grouping tasks"
+      },
+      "tasks": {
+        "type": "array<Task>",
+        "required": true,
+        "description": "Array of tasks to process through the pipeline"
+      }
+    }
+  },
+  "entities": {
+    "Task": {
+      "fields": {
+        "id": {
+          "type": "string",
+          "required": true,
+          "description": "Unique task identifier (e.g. '1.1.1', '2.1.2')"
+        },
+        "story_id": {
+          "type": "string",
+          "required": false,
+          "description": "Reference to parent Story.id if task belongs to a story"
+        },
+        "name": {
+          "type": "string",
+          "required": true,
+          "description": "Short task name/title"
+        },
+        "status": {
+          "type": "string",
+          "required": true,
+          "enum": [
+            "Todo",
+            "In-Progress",
+            "Review",
+            "Testing",
+            "Testing:Unit",
+            "Testing:Integration",
+            "Testing:Contract",
+            "Testing:Regression",
+            "Testing:Smoke",
+            "Testing:Security",
+            "Testing:Performance",
+            "Testing:Accessibility",
+            "Testing:Exploratory",
+            "Testing:UAT",
+            "Done",
+            "Blocked"
+          ],
+          "default": "Todo",
+          "description": "Current pipeline status"
+        },
+        "description": {
+          "type": "string",
+          "required": true,
+          "description": "Detailed description of what needs to be done"
+        },
+        "acceptance_criteria": {
+          "type": "array<AcceptanceCriterion>",
+          "required": true,
+          "description": "Verifiable criteria for task completion"
+        },
+        "notes": {
+          "type": "string",
+          "required": false,
+          "default": "",
+          "description": "Timestamped notes appended during processing"
+        },
+        "attempt_count": {
+          "type": "number",
+          "required": false,
+          "default": 0,
+          "description": "Number of processing attempts"
+        }
+      }
+    },
+    "Story": {
+      "fields": {
+        "id": {
+          "type": "string",
+          "required": true,
+          "description": "Unique story identifier (e.g. 'S-2.1')"
+        },
+        "name": {
+          "type": "string",
+          "required": true,
+          "description": "Short story name/title"
+        },
+        "status": {
+          "type": "string",
+          "required": true,
+          "enum": [
+            "Todo",
+            "In-Progress",
+            "Testing",
+            "Testing:Unit",
+            "Testing:Integration",
+            "Testing:Contract",
+            "Testing:Regression",
+            "Testing:Smoke",
+            "Testing:Security",
+            "Testing:Performance",
+            "Testing:Accessibility",
+            "Testing:Exploratory",
+            "Testing:UAT",
+            "Done",
+            "Blocked"
+          ],
+          "default": "Todo",
+          "description": "Current story status"
+        },
+        "description": {
+          "type": "string",
+          "required": true,
+          "description": "User story description"
+        },
+        "acceptance_criteria": {
+          "type": "array<AcceptanceCriterion>",
+          "required": true,
+          "description": "User-facing acceptance criteria (UAT script)"
+        },
+        "task_ids": {
+          "type": "array<string>",
+          "required": true,
+          "description": "Ordered list of task IDs belonging to this story"
+        },
+        "notes": {
+          "type": "string",
+          "required": false,
+          "default": "",
+          "description": "Timestamped notes appended during processing"
+        },
+        "attempt_count": {
+          "type": "number",
+          "required": false,
+          "default": 0,
+          "description": "Number of story-level testing attempts"
+        }
+      }
+    },
+    "AcceptanceCriterion": {
+      "fields": {
+        "criterion": {
+          "type": "string",
+          "required": true,
+          "description": "The verifiable criterion text"
+        },
+        "met": {
+          "type": "boolean",
+          "required": true,
+          "default": false,
+          "description": "Whether this criterion has been verified as met"
+        }
+      }
+    }
+  }
+}

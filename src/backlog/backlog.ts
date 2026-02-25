@@ -9,6 +9,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import type { Task, TaskStatus, BacklogFile, Story, StoryStatus } from "../types.js";
+import type { SchemaAdapter } from "./schema-adapter.js";
 
 // =============================================================================
 // Backlog class
@@ -16,9 +17,11 @@ import type { Task, TaskStatus, BacklogFile, Story, StoryStatus } from "../types
 
 export default class Backlog {
   private readonly filePath: string;
+  private readonly adapter?: SchemaAdapter;
 
-  constructor(filePath: string) {
+  constructor(filePath: string, adapter?: SchemaAdapter) {
     this.filePath = path.resolve(filePath);
+    this.adapter = adapter;
   }
 
   // ---------------------------------------------------------------------------
@@ -27,24 +30,31 @@ export default class Backlog {
 
   /**
    * Reads and parses the JSON backlog file.
+   * If a SchemaAdapter is present, transforms external format to canonical.
    * Throws if the file cannot be read or parsed.
    */
   private read(): BacklogFile {
     const raw = fs.readFileSync(this.filePath, "utf8");
-    return JSON.parse(raw) as BacklogFile;
+    const parsed = JSON.parse(raw);
+    if (this.adapter) {
+      return this.adapter.toCanonical(parsed as Record<string, unknown>);
+    }
+    return parsed as BacklogFile;
   }
 
   /**
    * Atomically writes `data` to the backlog file.
+   * If a SchemaAdapter is present, transforms canonical format back to external.
    * Matches the bash pattern:
    *   local tmp="${BACKLOG_FILE}.tmp.$$"
    *   jq ... > "$tmp" && mv "$tmp" "$BACKLOG_FILE"
    * Cleans up the temp file on failure.
    */
   private write(data: BacklogFile): void {
+    const output = this.adapter ? this.adapter.toExternal(data) : data;
     const tmpPath = `${this.filePath}.tmp.${process.pid}`;
     try {
-      fs.writeFileSync(tmpPath, JSON.stringify(data, null, 2), "utf8");
+      fs.writeFileSync(tmpPath, JSON.stringify(output, null, 2), "utf8");
       fs.renameSync(tmpPath, this.filePath);
     } catch (err) {
       try {

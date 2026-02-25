@@ -126,6 +126,14 @@ export interface ProjectConfig {
   devServer?: DevServerConfig;
   mcpConfigPath?: string;
   epicBriefPath?: string;
+  worktree?: WorktreeProjectConfig;
+}
+
+export interface WorktreeProjectConfig {
+  enabled: boolean;
+  branchPrefix: string;
+  symlinkFiles: string[];
+  setupCommands: string[];
 }
 
 export interface AgentResult {
@@ -134,4 +142,61 @@ export interface AgentResult {
   costUsd?: number;
   numTurns?: number;
   durationMs?: number;
+}
+
+// =============================================================================
+// Schema Mapping Types
+// =============================================================================
+
+export interface CompatibilityIssue {
+  type: "missing_field" | "wrong_type" | "invalid_enum" | "wrong_shape" | "missing_root_key";
+  path: string;
+  expected: string;
+  actual: string;
+}
+
+export interface ExternalSchemaFingerprint {
+  rootKeys: string[];
+  taskArrayKey: string;
+  sampleTaskKeys: string[];
+  criteriaShape: "object-array" | "string-array" | "object-different-keys" | "absent";
+  statusValues: string[];
+}
+
+export interface CompatibilityResult {
+  compatible: boolean;
+  issues: CompatibilityIssue[];
+  fingerprint: ExternalSchemaFingerprint;
+}
+
+export interface SchemaMapStatusMapping {
+  toCanonical: Record<string, string>;
+  toExternal: Record<string, string>;
+}
+
+export interface SchemaMapCriteriaMapping {
+  externalFormat: "object-array" | "string-array" | "object-different-keys";
+  criterionField?: string;
+  metField?: string;
+}
+
+export interface SchemaMap {
+  rootMapping: Record<string, string>;
+  taskFieldMapping: Record<string, string | null>;
+  storyFieldMapping: Record<string, string | null>;
+  statusMapping: SchemaMapStatusMapping;
+  acceptanceCriteria: SchemaMapCriteriaMapping;
+  defaults: Record<string, unknown>;
+}
+
+export interface SchemaMatrixEntry {
+  name: string;
+  fingerprint: {
+    taskArrayKey: string;
+    sampleTaskKeys: string[];
+    statusValues: string[];
+  };
+  mapFile: string;
+  generatedBy: string;
+  generatedAt: string;
 }

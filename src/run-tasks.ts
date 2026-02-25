@@ -21,7 +21,13 @@ import { runBlockerAnalysis } from "./runners/blocker-analysis.js";
 import { runBlockReporter } from "./runners/block-reporter.js";
 import { runDocUpdaterPhase } from "./runners/doc-updater.js";
 import { gitCommitDocs } from "./pipeline/git.js";
-import type { CliProvider } from "./types.js";
+import { WorktreeManager } from "./worktree/worktree.js";
+import { deriveConfigForWorktree } from "./worktree/config-overlay.js";
+import { checkCompatibility } from "./backlog/schema-checker.js";
+import { SchemaAdapter } from "./backlog/schema-adapter.js";
+import { findMapInMatrix, loadSchemaMap } from "./backlog/schema-matrix.js";
+import { runSchemaMapper } from "./runners/schema-mapper.js";
+import type { CliProvider, ProjectConfig, SchemaMap } from "./types.js";
 
 // --- Resolve paths ---
 const PROJECT_DIR = path.resolve(import.meta.dirname ?? process.cwd(), "..");
@@ -75,7 +81,7 @@ function parseArgs(args: string[]): ParsedArgs {
 }
 
 // --- Signal handler ---
-function setupCleanup(backlog: Backlog, logger: Logger, devServer?: DevServer): void {
+function setupCleanup(backlog: Backlog, logger: Logger, devServer?: DevServer, worktreeManager?: WorktreeManager): void {
   const cleanup = () => {
     console.log("");
     logger.log("WARN", "Interrupt received. Cleaning up...");
@@ -83,6 +89,11 @@ function setupCleanup(backlog: Backlog, logger: Logger, devServer?: DevServer): 
     // Stop dev server if we started it
     if (devServer) {
       devServer.stop();
+    }
+
+    // Clean up worktrees (force-remove, preserve branches)
+    if (worktreeManager) {
+      worktreeManager.cleanupAll();
     }
 
     // Clean up any temp files from atomic writes
@@ -135,8 +146,56 @@ async function main(): Promise<void> {
   // Load project config
   const config = loadProjectConfig(PROJECT_DIR);
 
-  // Initialize backlog
-  const backlog = new Backlog(BACKLOG_FILE);
+  // --- Schema compatibility check ---
+  let schemaAdapter: SchemaAdapter | undefined;
+
+  const rawBacklog = JSON.parse(fs.readFileSync(BACKLOG_FILE, "utf8"));
+  const compatResult = checkCompatibility(rawBacklog);
+
+  if (compatResult.compatible) {
+    logger.log("INFO", "Backlog schema: compatible with canonical format");
+  } else {
+    logger.log("WARN", `Backlog schema: ${compatResult.issues.length} compatibility issues found`);
+    for (const issue of compatResult.issues.slice(0, 5)) {
+      logger.log("WARN", `  [${issue.type}] ${issue.path}: expected ${issue.expected}, got ${issue.actual}`);
+    }
+
+    // Check matrix for existing map
+    const existingEntry = findMapInMatrix(compatResult.fingerprint, PROJECT_DIR);
+    let schemaMap: SchemaMap | null = null;
+
+    if (existingEntry) {
+      logger.log("INFO", `Schema matrix: found existing map '${existingEntry.name}' (${existingEntry.mapFile})`);
+      try {
+        schemaMap = loadSchemaMap(existingEntry.mapFile, PROJECT_DIR);
+      } catch (err) {
+        logger.log("WARN", `Failed to load existing map: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+
+    if (!schemaMap) {
+      // Invoke Opus agent to generate a new map
+      logger.log("INFO", "Schema matrix: no existing map found. Invoking schema mapper agent...");
+      schemaMap = await runSchemaMapper(
+        rawBacklog as Record<string, unknown>,
+        compatResult,
+        PROJECT_DIR,
+        logger,
+        args.verbose,
+      );
+    }
+
+    if (schemaMap) {
+      schemaAdapter = new SchemaAdapter(schemaMap);
+      logger.log("INFO", "Schema adapter: created — backlog will be transformed bidirectionally");
+    } else {
+      logger.log("ERROR", "Schema mapping failed. Cannot proceed with incompatible backlog format.");
+      process.exit(1);
+    }
+  }
+
+  // Initialize backlog (with optional adapter for non-canonical formats)
+  const backlog = new Backlog(BACKLOG_FILE, schemaAdapter);
 
   // --- Dev server + MCP setup ---
   let devServer: DevServer | undefined;
@@ -162,8 +221,17 @@ async function main(): Promise<void> {
     }
   }
 
-  // Setup signal handlers (pass devServer for cleanup)
-  setupCleanup(backlog, logger, devServer);
+  // --- Worktree setup ---
+  let worktreeManager: WorktreeManager | undefined;
+  let featureConfig: ProjectConfig = config; // Default: use original config
+
+  if (config.worktree?.enabled) {
+    worktreeManager = new WorktreeManager(config.projectDir, config.worktree, logger);
+    logger.log("INFO", "Worktree: integration enabled");
+  }
+
+  // Setup signal handlers (pass devServer + worktreeManager for cleanup)
+  setupCleanup(backlog, logger, devServer, worktreeManager);
 
   logger.log("INFO", "=== SDLC Task Loop Started ===");
   logger.log("INFO", `Backlog: ${BACKLOG_FILE}`);
@@ -188,9 +256,25 @@ async function main(): Promise<void> {
       ? path.resolve(PROJECT_DIR, args.epicBriefPath)
       : config.epicBriefPath || "";
 
+    // Extract epic name for feature branch naming
+    const epicName = epicBriefPath
+      ? path.basename(epicBriefPath, path.extname(epicBriefPath))
+      : undefined;
+
+    // Initialize feature branch + worktree before doc phase
+    if (worktreeManager) {
+      const featureWt = worktreeManager.initFeatureBranch(epicName);
+      if (featureWt) {
+        featureConfig = deriveConfigForWorktree(config, featureWt.worktreePath);
+        logger.log("INFO", `Worktree: feature branch '${featureWt.branchName}' active at ${featureWt.worktreePath}`);
+      } else {
+        logger.log("WARN", "Worktree: feature branch creation failed — running on main tree");
+      }
+    }
+
     if (epicBriefPath) {
-      await runDocUpdaterPhase(config, BACKLOG_FILE, epicBriefPath, logger, args.verbose);
-      gitCommitDocs(config.projectName, config.projectDir, logger);
+      await runDocUpdaterPhase(featureConfig, BACKLOG_FILE, epicBriefPath, logger, args.verbose);
+      gitCommitDocs(featureConfig.projectName, featureConfig.projectDir, logger);
     }
 
     // Handle --retry mode
@@ -203,7 +287,20 @@ async function main(): Promise<void> {
       backlog.resetTaskToTodo(args.retryTaskId);
       logger.log("INFO", `Task ${args.retryTaskId} reset to Todo`);
 
-      await processTask(args.retryTaskId, backlog, config, BACKLOG_FILE, logger, args.cliProvider, args.verbose, REPORTS_DIR, devServerRunning, mcpServers);
+      // In retry mode, determine effective config based on task's story
+      const retryTask = backlog.getTaskById(args.retryTaskId);
+      let retryConfig = featureConfig;
+      if (retryTask?.story_id && worktreeManager) {
+        const story = backlog.getStoryById(retryTask.story_id);
+        if (story) {
+          const storyWt = worktreeManager.getOrCreateStoryWorktree(story.id, story.name);
+          if (storyWt) {
+            retryConfig = deriveConfigForWorktree(config, storyWt.worktreePath);
+          }
+        }
+      }
+
+      await processTask(args.retryTaskId, backlog, retryConfig, BACKLOG_FILE, logger, args.cliProvider, args.verbose, REPORTS_DIR, devServerRunning, mcpServers);
       logger.printSummary();
       logger.log("INFO", `Session ended. Log: ${logger.sessionLogFile}`);
       return;
@@ -298,10 +395,22 @@ async function main(): Promise<void> {
       // Reset consecutive blocks counter on a clear task
       consecutiveBlocks = 0;
 
+      // Derive effective config: story worktree > feature worktree > original config
+      let effectiveConfig = featureConfig;
+      if (nextTask.story_id && worktreeManager) {
+        const story = backlog.getStoryById(nextTask.story_id);
+        if (story) {
+          const storyWt = worktreeManager.getOrCreateStoryWorktree(story.id, story.name);
+          if (storyWt) {
+            effectiveConfig = deriveConfigForWorktree(config, storyWt.worktreePath);
+          }
+        }
+      }
+
       // Process the task — retry until it reaches a terminal state
       while (true) {
         const success = await processTask(
-          taskId, backlog, config, BACKLOG_FILE, logger, args.cliProvider, args.verbose, REPORTS_DIR, devServerRunning, mcpServers,
+          taskId, backlog, effectiveConfig, BACKLOG_FILE, logger, args.cliProvider, args.verbose, REPORTS_DIR, devServerRunning, mcpServers,
         );
 
         if (success) {
@@ -311,7 +420,27 @@ async function main(): Promise<void> {
           const story = backlog.getStoryByTaskId(taskId);
           if (story && backlog.areAllStoryTasksDone(story.id) && story.status !== "Done") {
             logger.log("INFO", `[${story.id}] All tasks Done. Starting story-level testing...`);
-            await processStory(story.id, backlog, config, BACKLOG_FILE, logger, args.verbose, REPORTS_DIR, devServerRunning, mcpServers);
+
+            // Story-level testing runs in the story worktree
+            let storyConfig = effectiveConfig;
+            if (worktreeManager) {
+              const storyWt = worktreeManager.getStoryWorktree(story.id);
+              if (storyWt) {
+                storyConfig = deriveConfigForWorktree(config, storyWt.worktreePath);
+              }
+            }
+
+            const storySuccess = await processStory(story.id, backlog, storyConfig, BACKLOG_FILE, logger, args.verbose, REPORTS_DIR, devServerRunning, mcpServers);
+
+            // If story passed, merge story branch into feature branch
+            if (storySuccess && worktreeManager) {
+              const merged = worktreeManager.mergeStoryToFeature(story.id);
+              if (!merged) {
+                logger.log("WARN", `[${story.id}] Story merge conflict — marking story as Blocked`);
+                backlog.updateStoryStatus(story.id, "Blocked");
+                backlog.appendStoryNotes(story.id, "Blocked: merge conflict when merging to feature branch");
+              }
+            }
           }
 
           break;
@@ -331,6 +460,16 @@ async function main(): Promise<void> {
       }
 
       currentTaskId = "";
+    }
+
+    // --- Pipeline end: merge feature branch to base ---
+    if (worktreeManager && worktreeManager.getFeatureWorktree()) {
+      const featureWt = worktreeManager.getFeatureWorktree()!;
+      logger.log("INFO", `Worktree: merging feature branch '${featureWt.branchName}' to '${worktreeManager.getBaseBranch()}'`);
+      const merged = worktreeManager.mergeFeatureToBase();
+      if (!merged) {
+        logger.log("WARN", `Worktree: feature branch '${featureWt.branchName}' preserved — create a PR or merge manually`);
+      }
     }
 
     // End of loop - print final summary

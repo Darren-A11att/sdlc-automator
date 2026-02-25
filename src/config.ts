@@ -30,6 +30,9 @@ export const MAX_TURNS_DOC_UPDATER = 15;
 /** Model for doc-updater agents (Sonnet for cost efficiency — structured writing, not deep analysis) */
 export const MODEL_DOC_UPDATER = MODEL_SONNET;
 
+/** Max turns for schema mapping agent (Opus analyzes two schemas and writes a map file) */
+export const MAX_TURNS_SCHEMA_MAPPER = 5;
+
 /** Default allowed tools for all agents */
 export const ALLOWED_TOOLS = ["Bash", "Read", "Edit", "Write", "Glob", "Grep"];
 

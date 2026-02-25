@@ -31,5 +31,11 @@
       "readinessIntervalSeconds": 2
     },
     "mcpConfig": "OPTIONAL: Path to MCP server config for browser testing, e.g. 'templates/mcp-puppeteer.json'"
+  },
+  "worktree": {
+    "enabled": false,
+    "branchPrefix": "story",
+    "symlinkFiles": [".env", ".env.local"],
+    "setupCommands": ["npm install"]
   }
 }

@@ -46,6 +46,17 @@ export function loadProjectConfig(projectDir: string): ProjectConfig {
     ? path.resolve(projectDir, rawEpicBrief)
     : undefined;
 
+  // Parse optional worktree config
+  const rawWorktree = raw.worktree;
+  const worktree = rawWorktree?.enabled
+    ? {
+        enabled: true as const,
+        branchPrefix: (rawWorktree.branchPrefix as string) ?? "story",
+        symlinkFiles: (rawWorktree.symlinkFiles as string[]) ?? [],
+        setupCommands: (rawWorktree.setupCommands as string[]) ?? [],
+      }
+    : undefined;
+
   return {
     projectName,
     techStack: raw.techStack || "",
@@ -61,6 +72,7 @@ export function loadProjectConfig(projectDir: string): ProjectConfig {
     devServer,
     mcpConfigPath,
     epicBriefPath,
+    worktree,
   };
 }
 
