@@ -31,6 +31,8 @@ import type { CliProvider, ProjectConfig, SchemaMap } from "./types.js";
 
 // --- Resolve paths ---
 const PROJECT_DIR = path.resolve(import.meta.dirname ?? process.cwd(), "..");
+// In headless mode, package root IS the project dir (same directory)
+const SDLC_ROOT = PROJECT_DIR;
 const BACKLOG_FILE = path.join(PROJECT_DIR, "tasks", "backlog_tasks.json");
 const LOGS_DIR = path.join(PROJECT_DIR, "logs");
 const REPORTS_DIR = path.join(PROJECT_DIR, "reports");
@@ -161,13 +163,13 @@ async function main(): Promise<void> {
     }
 
     // Check matrix for existing map
-    const existingEntry = findMapInMatrix(compatResult.fingerprint, PROJECT_DIR);
+    const existingEntry = findMapInMatrix(compatResult.fingerprint, SDLC_ROOT);
     let schemaMap: SchemaMap | null = null;
 
     if (existingEntry) {
       logger.log("INFO", `Schema matrix: found existing map '${existingEntry.name}' (${existingEntry.mapFile})`);
       try {
-        schemaMap = loadSchemaMap(existingEntry.mapFile, PROJECT_DIR);
+        schemaMap = loadSchemaMap(existingEntry.mapFile, SDLC_ROOT);
       } catch (err) {
         logger.log("WARN", `Failed to load existing map: ${err instanceof Error ? err.message : String(err)}`);
       }
@@ -180,6 +182,7 @@ async function main(): Promise<void> {
         rawBacklog as Record<string, unknown>,
         compatResult,
         PROJECT_DIR,
+        SDLC_ROOT,
         logger,
         args.verbose,
       );

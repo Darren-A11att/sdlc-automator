@@ -2,9 +2,9 @@ import fs from "node:fs";
 import path from "node:path";
 import type { CompatibilityIssue } from "../types.js";
 
-export function buildSchemaMapperSystemPrompt(projectDir: string): string {
+export function buildSchemaMapperSystemPrompt(sdlcRoot: string): string {
   // Read the canonical schema definition
-  const schemaPath = path.join(projectDir, "templates", "schemas", "canonical.schema.json");
+  const schemaPath = path.join(sdlcRoot, "templates", "schemas", "canonical.schema.json");
   const canonicalSchema = fs.readFileSync(schemaPath, "utf-8");
 
   return `You are a schema mapping specialist. Your task is to produce a bidirectional mapping between an external backlog JSON format and a canonical schema.

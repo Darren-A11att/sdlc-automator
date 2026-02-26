@@ -54,6 +54,7 @@ export interface PipelineContext {
 export async function initPipeline(
   projectDir: string,
   rc: RuntimeConfig,
+  sdlcRoot: string,
 ): Promise<PipelineContext> {
   const backlogFilePath = path.resolve(projectDir, rc.backlogFile);
   const logsDir = path.join(projectDir, "logs");
@@ -74,18 +75,18 @@ export async function initPipeline(
 
   if (!compatResult.compatible) {
     logger.log("WARN", `Backlog schema: ${compatResult.issues.length} compatibility issues`);
-    const existingEntry = findMapInMatrix(compatResult.fingerprint, projectDir);
+    const existingEntry = findMapInMatrix(compatResult.fingerprint, sdlcRoot);
     let schemaMap: SchemaMap | null = null;
 
     if (existingEntry) {
       try {
-        schemaMap = loadSchemaMap(existingEntry.mapFile, projectDir);
+        schemaMap = loadSchemaMap(existingEntry.mapFile, sdlcRoot);
       } catch { /* ignore */ }
     }
 
     if (!schemaMap) {
       logger.log("INFO", "Invoking schema mapper agent...");
-      schemaMap = await runSchemaMapper(rawBacklog as Record<string, unknown>, compatResult, projectDir, logger, rc.verbose);
+      schemaMap = await runSchemaMapper(rawBacklog as Record<string, unknown>, compatResult, projectDir, sdlcRoot, logger, rc.verbose);
     }
 
     if (schemaMap) {
@@ -141,6 +142,7 @@ export async function initPipeline(
 export async function showRunPipelineMenu(
   projectDir: string,
   rc: RuntimeConfig,
+  sdlcRoot: string,
 ): Promise<void> {
   const choice = await select({
     message: "Run Pipeline",
@@ -159,7 +161,7 @@ export async function showRunPipelineMenu(
   let ctx: PipelineContext;
 
   try {
-    ctx = await initPipeline(projectDir, rc);
+    ctx = await initPipeline(projectDir, rc, sdlcRoot);
     spinner.succeed("Pipeline initialized.");
   } catch (err) {
     spinner.fail(`Pipeline init failed: ${err instanceof Error ? err.message : String(err)}`);

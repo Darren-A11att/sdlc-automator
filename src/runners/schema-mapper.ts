@@ -13,6 +13,7 @@ export async function runSchemaMapper(
   rawData: Record<string, unknown>,
   compatResult: CompatibilityResult,
   projectDir: string,
+  sdlcRoot: string,
   logger: Logger,
   verbose: boolean,
 ): Promise<SchemaMap | null> {
@@ -31,13 +32,13 @@ export async function runSchemaMapper(
   // Derive a map name from the fingerprint
   const mapName = `auto-${Date.now()}`;
   const mapFileName = `${mapName}.map.json`;
-  const mapFilePath = path.join(projectDir, "templates", "schemas", "maps", mapFileName);
+  const mapFilePath = path.join(sdlcRoot, "templates", "schemas", "maps", mapFileName);
   const logFile = path.join(projectDir, "logs", "schema-mapper.log");
 
   // Ensure maps directory exists
   fs.mkdirSync(path.dirname(mapFilePath), { recursive: true });
 
-  const systemPrompt = buildSchemaMapperSystemPrompt(projectDir);
+  const systemPrompt = buildSchemaMapperSystemPrompt(sdlcRoot);
   const userPrompt = buildSchemaMapperUserPrompt(sampleItems, compatResult.issues, mapFilePath);
 
   try {
@@ -63,7 +64,7 @@ export async function runSchemaMapper(
       return null;
     }
 
-    const map = loadSchemaMap(path.relative(projectDir, mapFilePath), projectDir);
+    const map = loadSchemaMap(path.relative(sdlcRoot, mapFilePath), sdlcRoot);
 
     // Validate required map fields
     if (!map.rootMapping || !map.taskFieldMapping || !map.statusMapping) {
@@ -84,7 +85,7 @@ export async function runSchemaMapper(
       generatedAt: new Date().toISOString(),
     };
 
-    registerInMatrix(entry, projectDir);
+    registerInMatrix(entry, sdlcRoot);
     logger.log("INFO", `[schema-mapper] Map generated and registered: ${mapFileName} ($${(result.costUsd ?? 0).toFixed(4)})`);
 
     return map;

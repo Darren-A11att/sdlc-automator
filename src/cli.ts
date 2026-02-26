@@ -96,7 +96,7 @@ async function mainMenu(rc: RuntimeConfig): Promise<void> {
       }
 
       if (choice === "run") {
-        await showRunPipelineMenu(PROJECT_DIR, rc);
+        await showRunPipelineMenu(PROJECT_DIR, rc, SDLC_ROOT);
       } else if (choice === "status") {
         const backlogPath = path.resolve(PROJECT_DIR, rc.backlogFile);
         if (fs.existsSync(backlogPath)) {

@@ -51,6 +51,12 @@ export const ALLOWED_TOOLS_BROWSER = [
   "mcp__puppeteer__puppeteer_evaluate",
 ];
 
+/** Max turns for project discovery agent (Opus analyzes codebase to discover config) */
+export const MAX_TURNS_PROJECT_DISCOVERY = 15;
+
+/** Read-only tools for agents that should not modify the codebase */
+export const ALLOWED_TOOLS_READONLY = ["Bash", "Read", "Glob", "Grep"];
+
 /** Configuration for a single test type */
 export interface TestTypeConfig {
   name: TestTypeName;

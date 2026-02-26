@@ -16,9 +16,9 @@ interface MatrixFile {
  */
 export function findMapInMatrix(
   fingerprint: ExternalSchemaFingerprint,
-  projectDir: string
+  sdlcRoot: string
 ): SchemaMatrixEntry | null {
-  const matrixPath = path.join(projectDir, "templates/schemas/matrix.json");
+  const matrixPath = path.join(sdlcRoot, "templates/schemas/matrix.json");
 
   if (!fs.existsSync(matrixPath)) {
     return null;
@@ -56,9 +56,9 @@ export function findMapInMatrix(
  */
 export function registerInMatrix(
   entry: SchemaMatrixEntry,
-  projectDir: string
+  sdlcRoot: string
 ): void {
-  const matrixPath = path.join(projectDir, "templates/schemas/matrix.json");
+  const matrixPath = path.join(sdlcRoot, "templates/schemas/matrix.json");
   const matrixDir = path.dirname(matrixPath);
 
   // Ensure directory exists
@@ -89,9 +89,9 @@ export function registerInMatrix(
  */
 export function loadSchemaMap(
   mapFile: string,
-  projectDir: string
+  sdlcRoot: string
 ): SchemaMap {
-  const mapPath = path.join(projectDir, mapFile);
+  const mapPath = path.join(sdlcRoot, mapFile);
 
   if (!fs.existsSync(mapPath)) {
     throw new Error(`Schema map file not found: ${mapPath}`);
