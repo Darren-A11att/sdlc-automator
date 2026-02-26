@@ -84,7 +84,7 @@ function formatToolResult(block: any): void {
 
   if (isError) {
     process.stderr.write(`  ${red}[RSLT]${reset}  ERROR ${truncate(content, 100)}\n`);
-  } else if (/exit code [1-9]|error:|fatal:/i.test(content)) {
+  } else if (/^(?:error:|fatal:)|exit code [1-9]/im.test(content)) {
     process.stderr.write(`  ${red}[RSLT]${reset}  ERROR ${truncate(content, 100)}\n`);
   } else if (content.length > 200) {
     const lineCount = content.split("\n").length;
@@ -210,7 +210,7 @@ function formatKimiToolResult(tr: KimiToolResultPayload): void {
 
   if (rv.is_error) {
     process.stderr.write(`  ${red}[RSLT]${reset}  ERROR ${truncate(content, 100)}\n`);
-  } else if (/exit code [1-9]|error:|fatal:/i.test(content)) {
+  } else if (/^(?:error:|fatal:)|exit code [1-9]/im.test(content)) {
     process.stderr.write(`  ${red}[RSLT]${reset}  ERROR ${truncate(content, 100)}\n`);
   } else if (content.length > 200) {
     const lineCount = content.split("\n").length;

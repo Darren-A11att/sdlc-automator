@@ -75,12 +75,12 @@ export async function initPipeline(
 
   if (!compatResult.compatible) {
     logger.log("WARN", `Backlog schema: ${compatResult.issues.length} compatibility issues`);
-    const existingEntry = findMapInMatrix(compatResult.fingerprint, sdlcRoot);
+    const existingEntry = findMapInMatrix(compatResult.fingerprint, sdlcRoot, projectDir);
     let schemaMap: SchemaMap | null = null;
 
     if (existingEntry) {
       try {
-        schemaMap = loadSchemaMap(existingEntry.mapFile, sdlcRoot);
+        schemaMap = loadSchemaMap(existingEntry.mapFile, projectDir, sdlcRoot);
       } catch { /* ignore */ }
     }
 

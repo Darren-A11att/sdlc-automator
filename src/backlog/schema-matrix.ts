@@ -13,13 +13,35 @@ interface MatrixFile {
 /**
  * Find a matching schema map in the matrix based on fingerprint similarity.
  * Matches on exact taskArrayKey and >80% overlap of sampleTaskKeys.
+ *
+ * Checks project-local matrix first (projectDir/.manera/schemas/matrix.json),
+ * then falls back to built-in matrix (sdlcRoot/templates/schemas/matrix.json).
  */
 export function findMapInMatrix(
   fingerprint: ExternalSchemaFingerprint,
-  sdlcRoot: string
+  sdlcRoot: string,
+  projectDir?: string,
 ): SchemaMatrixEntry | null {
-  const matrixPath = path.join(sdlcRoot, "templates/schemas/matrix.json");
+  // Check project-local matrix first
+  if (projectDir) {
+    const localResult = findInMatrixFile(
+      fingerprint,
+      path.join(projectDir, ".manera", "schemas", "matrix.json"),
+    );
+    if (localResult) return localResult;
+  }
 
+  // Fall back to built-in matrix
+  return findInMatrixFile(
+    fingerprint,
+    path.join(sdlcRoot, "templates", "schemas", "matrix.json"),
+  );
+}
+
+function findInMatrixFile(
+  fingerprint: ExternalSchemaFingerprint,
+  matrixPath: string,
+): SchemaMatrixEntry | null {
   if (!fs.existsSync(matrixPath)) {
     return null;
   }
@@ -53,12 +75,15 @@ export function findMapInMatrix(
 /**
  * Register a new schema map entry in the matrix.
  * Uses atomic write pattern (temp file + rename).
+ *
+ * baseDir is the root to resolve the matrix file location.
+ * When called from schema-mapper, this is projectDir (writes to .manera/schemas/matrix.json).
  */
 export function registerInMatrix(
   entry: SchemaMatrixEntry,
-  sdlcRoot: string
+  baseDir: string,
 ): void {
-  const matrixPath = path.join(sdlcRoot, "templates/schemas/matrix.json");
+  const matrixPath = path.join(baseDir, ".manera", "schemas", "matrix.json");
   const matrixDir = path.dirname(matrixPath);
 
   // Ensure directory exists
@@ -86,19 +111,28 @@ export function registerInMatrix(
 
 /**
  * Load a schema map file and parse it.
+ * Resolves mapFile relative to baseDir first, falls back to sdlcRoot.
  */
 export function loadSchemaMap(
   mapFile: string,
-  sdlcRoot: string
+  baseDir: string,
+  sdlcRoot?: string,
 ): SchemaMap {
-  const mapPath = path.join(sdlcRoot, mapFile);
-
-  if (!fs.existsSync(mapPath)) {
-    throw new Error(`Schema map file not found: ${mapPath}`);
+  // Try baseDir first
+  const primaryPath = path.join(baseDir, mapFile);
+  if (fs.existsSync(primaryPath)) {
+    const mapContent = fs.readFileSync(primaryPath, "utf-8");
+    return JSON.parse(mapContent) as SchemaMap;
   }
 
-  const mapContent = fs.readFileSync(mapPath, "utf-8");
-  const schemaMap: SchemaMap = JSON.parse(mapContent);
+  // Fall back to sdlcRoot for built-in maps
+  if (sdlcRoot) {
+    const fallbackPath = path.join(sdlcRoot, mapFile);
+    if (fs.existsSync(fallbackPath)) {
+      const mapContent = fs.readFileSync(fallbackPath, "utf-8");
+      return JSON.parse(mapContent) as SchemaMap;
+    }
+  }
 
-  return schemaMap;
+  throw new Error(`Schema map file not found: ${primaryPath}`);
 }

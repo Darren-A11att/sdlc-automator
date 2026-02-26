@@ -163,13 +163,13 @@ async function main(): Promise<void> {
     }
 
     // Check matrix for existing map
-    const existingEntry = findMapInMatrix(compatResult.fingerprint, SDLC_ROOT);
+    const existingEntry = findMapInMatrix(compatResult.fingerprint, SDLC_ROOT, PROJECT_DIR);
     let schemaMap: SchemaMap | null = null;
 
     if (existingEntry) {
       logger.log("INFO", `Schema matrix: found existing map '${existingEntry.name}' (${existingEntry.mapFile})`);
       try {
-        schemaMap = loadSchemaMap(existingEntry.mapFile, SDLC_ROOT);
+        schemaMap = loadSchemaMap(existingEntry.mapFile, PROJECT_DIR, SDLC_ROOT);
       } catch (err) {
         logger.log("WARN", `Failed to load existing map: ${err instanceof Error ? err.message : String(err)}`);
       }

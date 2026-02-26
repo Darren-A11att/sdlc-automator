@@ -175,8 +175,13 @@ export class SchemaAdapter {
   ): T {
     const externalKey = mapping[canonicalKey];
 
-    // If mapping is null, use default
+    // If mapping is null, the external format has no native field for this.
+    // Check if we previously persisted the value under the canonical key name.
     if (externalKey === null) {
+      const persisted = item[canonicalKey];
+      if (persisted !== undefined && persisted !== null) {
+        return persisted as T;
+      }
       return defaults[canonicalKey] as T;
     }
 
@@ -267,6 +272,10 @@ export class SchemaAdapter {
     for (const [canonicalKey, externalKey] of Object.entries(mapping)) {
       if (externalKey !== null) {
         usedKeys.add(externalKey || canonicalKey);
+      } else {
+        // Null-mapped fields may be persisted under their canonical key name;
+        // mark them as used so they aren't double-stored as extras.
+        usedKeys.add(canonicalKey);
       }
     }
 
@@ -406,8 +415,12 @@ export class SchemaAdapter {
   ): void {
     const externalKey = mapping[canonicalKey];
 
-    // If mapping is null, omit the field
+    // If mapping is null, persist under canonical key name so pipeline-internal
+    // fields (attempt_count, notes, etc.) survive the round-trip.
     if (externalKey === null) {
+      if (value !== undefined) {
+        output[canonicalKey] = value;
+      }
       return;
     }
 
@@ -426,6 +439,15 @@ export class SchemaAdapter {
     const format = this.map.acceptanceCriteria.externalFormat;
 
     if (format === "string-array") {
+      // If any criterion has been tested (met !== false), upgrade to object-array
+      // so the met state survives the round-trip through the external format.
+      const anyTested = canonical.some((c) => c.met !== false);
+      if (anyTested) {
+        return canonical.map((c) => ({
+          criterion: c.criterion,
+          met: c.met,
+        }));
+      }
       return canonical.map((c) => c.criterion);
     }
 

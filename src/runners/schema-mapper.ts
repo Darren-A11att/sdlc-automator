@@ -32,7 +32,7 @@ export async function runSchemaMapper(
   // Derive a map name from the fingerprint
   const mapName = `auto-${Date.now()}`;
   const mapFileName = `${mapName}.map.json`;
-  const mapFilePath = path.join(sdlcRoot, "templates", "schemas", "maps", mapFileName);
+  const mapFilePath = path.join(projectDir, ".manera", "schemas", "maps", mapFileName);
   const logFile = path.join(projectDir, "logs", "schema-mapper.log");
 
   // Ensure maps directory exists
@@ -64,7 +64,7 @@ export async function runSchemaMapper(
       return null;
     }
 
-    const map = loadSchemaMap(path.relative(sdlcRoot, mapFilePath), sdlcRoot);
+    const map = loadSchemaMap(path.relative(projectDir, mapFilePath), projectDir);
 
     // Validate required map fields
     if (!map.rootMapping || !map.taskFieldMapping || !map.statusMapping) {
@@ -72,7 +72,7 @@ export async function runSchemaMapper(
       return null;
     }
 
-    // Register in matrix
+    // Register in project-local matrix
     const entry: SchemaMatrixEntry = {
       name: mapName,
       fingerprint: {
@@ -80,12 +80,12 @@ export async function runSchemaMapper(
         sampleTaskKeys: compatResult.fingerprint.sampleTaskKeys,
         statusValues: compatResult.fingerprint.statusValues,
       },
-      mapFile: `templates/schemas/maps/${mapFileName}`,
+      mapFile: `.manera/schemas/maps/${mapFileName}`,
       generatedBy: "schema-mapper-opus",
       generatedAt: new Date().toISOString(),
     };
 
-    registerInMatrix(entry, sdlcRoot);
+    registerInMatrix(entry, projectDir);
     logger.log("INFO", `[schema-mapper] Map generated and registered: ${mapFileName} ($${(result.costUsd ?? 0).toFixed(4)})`);
 
     return map;
