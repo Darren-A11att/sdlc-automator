@@ -1,6 +1,6 @@
 {
   "name": "manera",
-  "version": "2.0.1",
+  "version": "2.0.2",
   "description": "AI-powered SDLC automation pipeline — implement, review, test, and fix code with Claude and Kimi agents",
   "type": "module",
   "license": "MIT",
