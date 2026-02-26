@@ -10,6 +10,7 @@ import { runTaskTestOrchestrator } from "../runners/task-test-orchestrator.js";
 import { gitCommitTask, gitCommitProgress } from "./git.js";
 import type { CliProvider, ProjectConfig } from "../types.js";
 import type Logger from "../logging/logger.js";
+import type { ModelOverrides } from "../cli/config-manager.js";
 
 /**
  * Process a single task through the full SDLC pipeline.
@@ -32,6 +33,7 @@ export async function processTask(
   reportsDir: string,
   devServerRunning = false,
   mcpServers?: Record<string, McpStdioServerConfig>,
+  modelOverrides?: ModelOverrides,
 ): Promise<boolean> {
   // Fetch fresh task data
   let task = backlog.getTaskById(taskId);
@@ -60,7 +62,7 @@ export async function processTask(
   if (attemptCount === 1) {
     backlog.updateTaskStatus(taskId, "In-Progress");
 
-    const implResult = await runImplementer(task, config, backlogFile, logger, cliProvider, verbose);
+    const implResult = await runImplementer(task, config, backlogFile, logger, cliProvider, verbose, modelOverrides?.implementer);
     if (!implResult.success) {
       backlog.appendTaskNotes(taskId, `Implementer failed on attempt ${attemptCount}`);
       backlog.updateTaskStatus(taskId, "Todo");
@@ -74,7 +76,7 @@ export async function processTask(
   backlog.updateTaskStatus(taskId, "Review");
   task = backlog.getTaskById(taskId)!;
 
-  const reviewResult = await runReviewer(task, implOutput, config, backlogFile, logger, verbose);
+  const reviewResult = await runReviewer(task, implOutput, config, backlogFile, logger, verbose, modelOverrides?.reviewer);
   if (!reviewResult.success) {
     backlog.appendTaskNotes(taskId, `Reviewer failed on attempt ${attemptCount}`);
     backlog.updateTaskStatus(taskId, "Todo");
@@ -92,7 +94,7 @@ export async function processTask(
     backlog.updateTaskStatus(taskId, "In-Progress");
     task = backlog.getTaskById(taskId)!;
 
-    const fixResult = await runFixer(task, reviewNotes, attemptCount, config, backlogFile, logger, verbose);
+    const fixResult = await runFixer(task, reviewNotes, attemptCount, config, backlogFile, logger, verbose, modelOverrides?.fixer);
     if (!fixResult.success) {
       backlog.appendTaskNotes(taskId, `Fixer failed after review on attempt ${attemptCount}`);
       backlog.updateTaskStatus(taskId, "Todo");
@@ -107,6 +109,7 @@ export async function processTask(
 
   const taskTestResult = await runTaskTestOrchestrator(
     task, config, backlogFile, backlog, logger, verbose, reportsDir, devServerRunning, mcpServers,
+    modelOverrides?.tester, modelOverrides?.fixer,
   );
 
   if (taskTestResult.overallVerdict === "PASS") {

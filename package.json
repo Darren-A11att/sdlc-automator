@@ -1,20 +1,53 @@
 {
-  "name": "sdlc-automator",
+  "name": "manera",
   "version": "2.0.0",
-  "description": "Generic, project-agnostic SDLC automation pipeline using Claude Agent SDK",
+  "description": "AI-powered SDLC automation pipeline — implement, review, test, and fix code with Claude and Kimi agents",
   "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Darren-A11att/sdlc-automator.git"
+  },
+  "homepage": "https://github.com/Darren-A11att/sdlc-automator#readme",
+  "bugs": {
+    "url": "https://github.com/Darren-A11att/sdlc-automator/issues"
+  },
+  "keywords": [
+    "sdlc",
+    "automation",
+    "claude",
+    "ai",
+    "pipeline",
+    "code-review",
+    "testing",
+    "agent",
+    "cli"
+  ],
+  "bin": {
+    "manera": "./src/cli.ts"
+  },
+  "files": [
+    "src/",
+    "scripts/",
+    "templates/"
+  ],
   "scripts": {
     "start": "tsx src/run-tasks.ts",
+    "cli": "tsx src/cli.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.1.0",
-    "@moonshot-ai/kimi-agent-sdk": "^0.1.4"
+    "@inquirer/prompts": "^8.3.0",
+    "@moonshot-ai/kimi-agent-sdk": "^0.1.4",
+    "chalk": "^5.6.2",
+    "cli-table3": "^0.6.5",
+    "ora": "^9.3.0",
+    "tsx": "^4.19.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
-    "tsx": "^4.19.0",
     "typescript": "^5.7.0",
     "vitest": "^3.0.0"
   },

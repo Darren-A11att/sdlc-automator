@@ -14,16 +14,18 @@ export async function runReviewer(
   backlogFile: string,
   logger: Logger,
   verbose: boolean,
+  model?: string,
 ): Promise<AgentResult> {
   const taskLogDir = logger.getTaskLogDir(task.id);
+  const effectiveModel = model ?? MODEL_OPUS;
 
-  logger.log("INFO", `[${task.id}] Running Reviewer (Opus)...`);
+  logger.log("INFO", `[${task.id}] Running Reviewer (${effectiveModel})...`);
 
   const sysPrompt = buildReviewerSystemPrompt(config, backlogFile);
   const userPrompt = buildReviewerUserPrompt(task, filesChanged, config);
 
   const result = await invokeClaudeAgent({
-    model: MODEL_OPUS,
+    model: effectiveModel,
     maxTurns: MAX_TURNS_REVIEWER,
     systemPrompt: sysPrompt,
     userPrompt,

@@ -34,6 +34,7 @@ async function runSingleStoryTest(
   verbose: boolean,
   devServerRunning: boolean,
   mcpServers?: Record<string, McpStdioServerConfig>,
+  testerModel?: string,
 ): Promise<TestTypeResult> {
   const startTime = Date.now();
   const logDir = path.join(logger.logsDir, "stories", story.id);
@@ -43,6 +44,7 @@ async function runSingleStoryTest(
   const useBrowser = testType.requiresBrowser !== false && devServerRunning && mcpServers !== undefined;
   const effectiveTools = useBrowser ? ALLOWED_TOOLS_BROWSER : ALLOWED_TOOLS;
   const effectiveMaxTurns = useBrowser ? MAX_TURNS_TESTER_BROWSER : testType.maxTurns;
+  const effectiveModel = testerModel ?? MODEL_OPUS;
 
   if (useBrowser) {
     logger.log("INFO", `[${story.id}] Running story ${testType.label} (browser-enabled)...`);
@@ -54,7 +56,7 @@ async function runSingleStoryTest(
   const userPrompt = buildStoryTestUserPrompt(testType, story, tasks, previousResults);
 
   const result = await invokeClaudeAgent({
-    model: MODEL_OPUS,
+    model: effectiveModel,
     maxTurns: effectiveMaxTurns,
     systemPrompt: sysPrompt,
     userPrompt,
@@ -146,9 +148,11 @@ async function runStoryTestFix(
   backlogFile: string,
   logger: Logger,
   verbose: boolean,
+  fixerModel?: string,
 ): Promise<boolean> {
   const logDir = path.join(logger.logsDir, "stories", story.id);
   fs.mkdirSync(logDir, { recursive: true });
+  const effectiveModel = fixerModel ?? MODEL_OPUS;
 
   logger.log("INFO", `[${story.id}] Fixing story ${testType.label} failure (fix #${fixNumber})...`);
 
@@ -156,7 +160,7 @@ async function runStoryTestFix(
   const userPrompt = buildStoryFixerUserPrompt(testType, story, tasks, failureNotes);
 
   const result = await invokeClaudeAgent({
-    model: MODEL_OPUS,
+    model: effectiveModel,
     maxTurns: MAX_TURNS_TEST_FIXER,
     systemPrompt: sysPrompt,
     userPrompt,
@@ -238,6 +242,8 @@ export async function runStoryTestOrchestrator(
   reportsDir: string,
   devServerRunning = false,
   mcpServers?: Record<string, McpStdioServerConfig>,
+  testerModel?: string,
+  fixerModel?: string,
 ): Promise<TestOrchestrationResult> {
   const results: TestTypeResult[] = [];
   let overallVerdict: Verdict = "PASS";
@@ -251,7 +257,7 @@ export async function runStoryTestOrchestrator(
 
     // Run the test type
     let result = await runSingleStoryTest(
-      testType, story, tasks, config, backlogFile, results, logger, verbose, devServerRunning, mcpServers,
+      testType, story, tasks, config, backlogFile, results, logger, verbose, devServerRunning, mcpServers, testerModel,
     );
 
     // If failed, try to fix and re-run once
@@ -263,7 +269,7 @@ export async function runStoryTestOrchestrator(
       backlog.updateStoryStatus(story.id, "In-Progress");
       const freshStory = backlog.getStoryById(story.id)!;
       const fixed = await runStoryTestFix(
-        testType, freshStory, tasks, result.notes, attemptCount, config, backlogFile, logger, verbose,
+        testType, freshStory, tasks, result.notes, attemptCount, config, backlogFile, logger, verbose, fixerModel,
       );
 
       if (fixed) {
@@ -271,7 +277,7 @@ export async function runStoryTestOrchestrator(
         backlog.updateStoryStatus(story.id, `Testing:${testType.statusSuffix}`);
         const retryStory = backlog.getStoryById(story.id)!;
         const retryResult = await runSingleStoryTest(
-          testType, retryStory, tasks, config, backlogFile, results, logger, verbose, devServerRunning, mcpServers,
+          testType, retryStory, tasks, config, backlogFile, results, logger, verbose, devServerRunning, mcpServers, testerModel,
         );
 
         if (retryResult.verdict === "PASS") {

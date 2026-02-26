@@ -33,6 +33,7 @@ async function runSingleTestType(
   verbose: boolean,
   devServerRunning: boolean,
   mcpServers?: Record<string, McpStdioServerConfig>,
+  testerModel?: string,
 ): Promise<TestTypeResult> {
   const startTime = Date.now();
   const taskLogDir = logger.getTaskLogDir(task.id);
@@ -41,6 +42,7 @@ async function runSingleTestType(
   const useBrowser = testType.requiresBrowser !== false && devServerRunning && mcpServers !== undefined;
   const effectiveTools = useBrowser ? ALLOWED_TOOLS_BROWSER : ALLOWED_TOOLS;
   const effectiveMaxTurns = useBrowser ? MAX_TURNS_TESTER_BROWSER : testType.maxTurns;
+  const effectiveModel = testerModel ?? MODEL_OPUS;
 
   if (useBrowser) {
     logger.log("INFO", `[${task.id}] Running ${testType.label} (browser-enabled)...`);
@@ -52,7 +54,7 @@ async function runSingleTestType(
   const userPrompt = buildTestTypeUserPrompt(testType, task, previousResults);
 
   const result = await invokeClaudeAgent({
-    model: MODEL_OPUS,
+    model: effectiveModel,
     maxTurns: effectiveMaxTurns,
     systemPrompt: sysPrompt,
     userPrompt,
@@ -108,8 +110,10 @@ async function runTestFix(
   backlogFile: string,
   logger: Logger,
   verbose: boolean,
+  fixerModel?: string,
 ): Promise<boolean> {
   const taskLogDir = logger.getTaskLogDir(task.id);
+  const effectiveModel = fixerModel ?? MODEL_OPUS;
 
   logger.log("INFO", `[${task.id}] Fixing ${testType.label} failure (fix #${fixNumber})...`);
 
@@ -117,7 +121,7 @@ async function runTestFix(
   const userPrompt = buildFixerUserPrompt(task, `${testType.label} failure:\n${failureNotes}`);
 
   const result = await invokeClaudeAgent({
-    model: MODEL_OPUS,
+    model: effectiveModel,
     maxTurns: MAX_TURNS_TEST_FIXER,
     systemPrompt: sysPrompt,
     userPrompt,
@@ -198,6 +202,8 @@ export async function runTaskTestOrchestrator(
   reportsDir: string,
   devServerRunning = false,
   mcpServers?: Record<string, McpStdioServerConfig>,
+  testerModel?: string,
+  fixerModel?: string,
 ): Promise<TestOrchestrationResult> {
   const results: TestTypeResult[] = [];
   let overallVerdict: Verdict = "PASS";
@@ -211,7 +217,7 @@ export async function runTaskTestOrchestrator(
 
     // Run the test type
     let result = await runSingleTestType(
-      testType, task, config, backlogFile, results, logger, verbose, devServerRunning, mcpServers,
+      testType, task, config, backlogFile, results, logger, verbose, devServerRunning, mcpServers, testerModel,
     );
 
     // If failed, try to fix and re-run once
@@ -223,7 +229,7 @@ export async function runTaskTestOrchestrator(
       backlog.updateTaskStatus(task.id, "In-Progress");
       const freshTask = backlog.getTaskById(task.id)!;
       const fixed = await runTestFix(
-        testType, freshTask, result.notes, attemptCount, config, backlogFile, logger, verbose,
+        testType, freshTask, result.notes, attemptCount, config, backlogFile, logger, verbose, fixerModel,
       );
 
       if (fixed) {
@@ -231,7 +237,7 @@ export async function runTaskTestOrchestrator(
         backlog.updateTaskStatus(task.id, `Testing:${testType.statusSuffix}`);
         const retryTask = backlog.getTaskById(task.id)!;
         const retryResult = await runSingleTestType(
-          testType, retryTask, config, backlogFile, results, logger, verbose, devServerRunning, mcpServers,
+          testType, retryTask, config, backlogFile, results, logger, verbose, devServerRunning, mcpServers, testerModel,
         );
 
         if (retryResult.verdict === "PASS") {

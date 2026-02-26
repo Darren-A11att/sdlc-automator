@@ -15,16 +15,18 @@ export async function runFixer(
   backlogFile: string,
   logger: Logger,
   verbose: boolean,
+  model?: string,
 ): Promise<AgentResult> {
   const taskLogDir = logger.getTaskLogDir(task.id);
+  const effectiveModel = model ?? MODEL_OPUS;
 
-  logger.log("INFO", `[${task.id}] Running Fixer (Opus) - fix attempt ${fixNumber}...`);
+  logger.log("INFO", `[${task.id}] Running Fixer (${effectiveModel}) - fix attempt ${fixNumber}...`);
 
   const sysPrompt = buildFixerSystemPrompt(config, backlogFile);
   const userPrompt = buildFixerUserPrompt(task, failureNotes);
 
   const result = await invokeClaudeAgent({
-    model: MODEL_OPUS,
+    model: effectiveModel,
     maxTurns: MAX_TURNS_FIXER,
     systemPrompt: sysPrompt,
     userPrompt,

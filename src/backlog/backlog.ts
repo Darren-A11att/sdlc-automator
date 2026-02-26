@@ -348,6 +348,78 @@ export default class Backlog {
     this.write(data);
   }
 
+  // ---------------------------------------------------------------------------
+  // Batch operations (used by CLI)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Reset all tasks to Todo status, clearing attempt_count and criteria.
+   * Returns the number of tasks reset.
+   */
+  resetAllToTodo(): number {
+    const data = this.read();
+    let count = 0;
+    data.tasks = data.tasks.map((t) => {
+      if (t.status === "Todo" && t.attempt_count === 0) return t;
+      count++;
+      return {
+        ...t,
+        status: "Todo" as TaskStatus,
+        attempt_count: 0,
+        acceptance_criteria: t.acceptance_criteria.map((ac) => ({ ...ac, met: false })),
+      };
+    });
+    if (data.stories) {
+      data.stories = data.stories.map((s) => ({
+        ...s,
+        status: "Todo" as StoryStatus,
+        attempt_count: 0,
+        acceptance_criteria: s.acceptance_criteria.map((ac) => ({ ...ac, met: false })),
+      }));
+    }
+    this.write(data);
+    return count;
+  }
+
+  /**
+   * Reset all Blocked tasks to Todo status.
+   * Returns the number of tasks reset.
+   */
+  resetBlockedToTodo(): number {
+    const data = this.read();
+    let count = 0;
+    data.tasks = data.tasks.map((t) => {
+      if (t.status !== "Blocked") return t;
+      count++;
+      return {
+        ...t,
+        status: "Todo" as TaskStatus,
+        attempt_count: 0,
+        acceptance_criteria: t.acceptance_criteria.map((ac) => ({ ...ac, met: false })),
+      };
+    });
+    if (data.stories) {
+      data.stories = data.stories.map((s) => {
+        if (s.status !== "Blocked") return s;
+        return {
+          ...s,
+          status: "Todo" as StoryStatus,
+          attempt_count: 0,
+          acceptance_criteria: s.acceptance_criteria.map((ac) => ({ ...ac, met: false })),
+        };
+      });
+    }
+    this.write(data);
+    return count;
+  }
+
+  /**
+   * Returns all stories in the backlog.
+   */
+  getAllStories(): Story[] {
+    return this.read().stories ?? [];
+  }
+
   getNextStoryReadyForTesting(): Story | null {
     const data = this.read();
     const stories = data.stories ?? [];

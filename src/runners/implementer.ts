@@ -15,16 +15,18 @@ export async function runImplementer(
   logger: Logger,
   cliProvider: CliProvider,
   verbose: boolean,
+  model?: string,
 ): Promise<AgentResult> {
   const taskLogDir = logger.getTaskLogDir(task.id);
+  const effectiveModel = model ?? MODEL_SONNET;
 
-  logger.log("INFO", `[${task.id}] Running Implementer (Sonnet)...`);
+  logger.log("INFO", `[${task.id}] Running Implementer (${effectiveModel})...`);
 
   const sysPrompt = buildImplementerSystemPrompt(config, backlogFile);
   const userPrompt = buildImplementerUserPrompt(task);
 
   const result = await invokeAgent(cliProvider, {
-    model: MODEL_SONNET,
+    model: effectiveModel,
     maxTurns: MAX_TURNS_IMPLEMENTER,
     systemPrompt: sysPrompt,
     userPrompt,
