@@ -6,7 +6,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Darren-A11att/sdlc-automator.git"
+    "url": "git+https://github.com/Darren-A11att/sdlc-automator.git"
   },
   "homepage": "https://github.com/Darren-A11att/sdlc-automator#readme",
   "bugs": {
@@ -24,7 +24,7 @@
     "cli"
   ],
   "bin": {
-    "manera": "./src/cli.ts"
+    "manera": "src/cli.ts"
   },
   "files": [
     "src/",
